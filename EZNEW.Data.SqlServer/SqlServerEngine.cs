@@ -148,6 +148,7 @@ namespace EZNEW.Data.SqlServer
                 }
             }
             string preScript = tranResult.PreScript;
+            string joinScript = tranResult.AllowJoin ? tranResult.JoinScript : string.Empty;
 
             #endregion
 
@@ -167,14 +168,25 @@ namespace EZNEW.Data.SqlServer
                 switch (cmd.Operate)
                 {
                     case OperateType.Insert:
-                        cmdText.AppendFormat("INSERT INTO [{0}] ({1}) VALUES ({2})", objectName, string.Join(",", FormatEditFields(fields)), string.Join(",", fields.Select(c => "@" + c)));
+                        cmdText.AppendFormat("INSERT INTO [{0}] ({1}) VALUES ({2})"
+                            , objectName
+                            , string.Join(",", FormatEditFields(fields))
+                            , string.Join(",", fields.Select(c => "@" + c)));
                         break;
                     case OperateType.Update:
                         IDictionary<string, dynamic> oldCmdParameterDict = null;
                         IDictionary<string, dynamic> newCmdParameterDict = new Dictionary<string, dynamic>();
-                        if (cmd.Parameters is IDictionary<string, dynamic>)
+                        if (cmd.Parameters is IDictionary<string, IModifyValue>)
+                        {
+                            oldCmdParameterDict = (cmd.Parameters as IDictionary<string, IModifyValue>).ToDictionary<KeyValuePair<string, IModifyValue>, string, dynamic>(c => c.Key, c => c.Value);
+                        }
+                        else if (cmd.Parameters is IDictionary<string, dynamic>)
                         {
                             oldCmdParameterDict = cmd.Parameters as IDictionary<string, dynamic>;
+                        }
+                        else if (cmd.Parameters is IDictionary<string, object>)
+                        {
+                            oldCmdParameterDict = cmd.Parameters as IDictionary<string, object>;
                         }
                         else
                         {
@@ -185,7 +197,10 @@ namespace EZNEW.Data.SqlServer
                         {
                             if (oldCmdParameterDict == null || !oldCmdParameterDict.ContainsKey(field) || !(oldCmdParameterDict[field] is CalculateModifyValue))
                             {
-                                updateSetArray.Add(string.Format("{0}.[{1}]=@{2}", queryTranslator.ObjectPetName, field.FieldName, field));
+                                updateSetArray.Add(string.Format("{0}.[{1}]=@{2}"
+                                    , queryTranslator.ObjectPetName
+                                    , field.FieldName
+                                    , field));
                                 if (oldCmdParameterDict != null && oldCmdParameterDict.ContainsKey(field))
                                 {
                                     var fieldParameter = oldCmdParameterDict[field];
@@ -202,18 +217,38 @@ namespace EZNEW.Data.SqlServer
                                 CalculateModifyValue calModify = oldCmdParameterDict[field] as CalculateModifyValue;
                                 newCmdParameterDict.Add(field, calModify.Value);
                                 string calChar = GetCalculateChar(calModify.Operator);
-                                updateSetArray.Add(string.Format("{0}.[{1}]={0}.[{1}]{2}@{3}", queryTranslator.ObjectPetName, field.FieldName, calChar, field));
+                                updateSetArray.Add(string.Format("{0}.[{1}]={0}.[{1}]{2}@{3}"
+                                    , queryTranslator.ObjectPetName
+                                    , field.FieldName
+                                    , calChar
+                                    , field));
                             }
                         }
                         newParameters = newCmdParameterDict;
-                        cmdText.AppendFormat("{4}UPDATE {0} SET {1} FROM [{2}] AS {0} {3}", queryTranslator.ObjectPetName, string.Join(",", updateSetArray.ToArray()), objectName, conditionString, preScript);
+                        cmdText.AppendFormat("{4}UPDATE {0} SET {1} FROM [{2}] AS {0}{5} {3}"
+                            , queryTranslator.ObjectPetName
+                            , string.Join(",", updateSetArray.ToArray())
+                            , objectName
+                            , conditionString
+                            , preScript
+                            , joinScript);
                         break;
                     case OperateType.Delete:
-                        cmdText.AppendFormat("{3}DELETE {0} FROM [{1}] AS {0} {2}", queryTranslator.ObjectPetName, objectName, conditionString, preScript);
+                        cmdText.AppendFormat("{3}DELETE {0} FROM [{1}] AS {0}{4} {2}"
+                            , queryTranslator.ObjectPetName
+                            , objectName
+                            , conditionString
+                            , preScript
+                            , joinScript);
                         break;
                     case OperateType.Exist:
-                        var defaultField = GetDefaultField(cmd.EntityType, fields);
-                        cmdText.AppendFormat("IF EXISTS(SELECT {0}.[{1}] FROM [{2}] AS {0} {3}) SELECT 1 ELSE SELECT 0", queryTranslator.ObjectPetName, defaultField.FieldName, objectName, conditionString);
+                        cmdText.AppendFormat("{5}SELECT 1 WHERE EXISTS(SELECT {0}.[{1}] FROM [{2}] AS {0}{4} {3})"
+                                            , queryTranslator.ObjectPetName
+                                            , fields[0].FieldName
+                                            , objectName
+                                            , conditionString
+                                            , joinScript
+                                            , preScript);
                         executeCmdResult = ExecuteCommandResult.ExecuteScalar;
                         break;
                     default:
@@ -322,6 +357,7 @@ namespace EZNEW.Data.SqlServer
             IQueryTranslator queryTranslator = QueryTranslator.GetTranslator(server);
             var tranResult = queryTranslator.Translate(cmd.Query);
             string preScript = tranResult.PreScript;
+            string joinScript = tranResult.AllowJoin ? tranResult.JoinScript : string.Empty;
 
             #endregion
 
@@ -336,10 +372,15 @@ namespace EZNEW.Data.SqlServer
                 case QueryCommandType.QueryObject:
                 default:
                     int size = cmd.Query == null ? 0 : cmd.Query.QuerySize;
-                    //string fieldSplitChar = string.Format(",{0}.", queryTranslator.ObjectPetName);
                     string objectName = DataManager.GetEntityObjectName(ServerType.SQLServer, cmd.EntityType, cmd.ObjectName);
                     var fields = GetFields(cmd.EntityType, cmd.Fields);
-                    cmdText.AppendFormat("{4}SELECT {0} {1} FROM [{2}] AS {3}", size > 0 ? "TOP " + size : "", string.Join(",", FormatQueryFields(queryTranslator.ObjectPetName, fields)), objectName, queryTranslator.ObjectPetName, preScript);
+                    cmdText.AppendFormat("{4}SELECT {0} {1} FROM [{2}] AS {3}{5}"
+                        , size > 0 ? "TOP " + size : ""
+                        , string.Join(",", FormatQueryFields(queryTranslator.ObjectPetName, fields))
+                        , objectName
+                        , queryTranslator.ObjectPetName
+                        , preScript
+                        , joinScript);
                     if (!tranResult.ConditionString.IsNullOrEmpty())
                     {
                         cmdText.AppendFormat(" WHERE {0}", tranResult.ConditionString);
@@ -428,6 +469,7 @@ namespace EZNEW.Data.SqlServer
 
             #region execute
 
+            string joinScript = tranResult.AllowJoin ? tranResult.JoinScript : string.Empty;
             StringBuilder cmdText = new StringBuilder();
             switch (cmd.Query.QueryType)
             {
@@ -436,11 +478,16 @@ namespace EZNEW.Data.SqlServer
                     break;
                 case QueryCommandType.QueryObject:
                 default:
-                    //string fieldSplitChar = string.Format(",{0}.", queryTranslator.ObjectPetName);
                     string objectName = DataManager.GetEntityObjectName(ServerType.SQLServer, cmd.EntityType, cmd.ObjectName);
                     var fields = GetFields(cmd.EntityType, cmd.Fields);
                     var defaultField = GetDefaultField(cmd.EntityType, fields);
-                    cmdText.AppendFormat("{4}SELECT COUNT({3}.[{0}]) OVER() AS PagingTotalCount,{1} FROM [{2}] AS {3}", defaultField.FieldName, string.Join(",", FormatQueryFields(queryTranslator.ObjectPetName, fields)), objectName, queryTranslator.ObjectPetName, tranResult.PreScript);
+                    cmdText.AppendFormat("{4}SELECT COUNT({3}.[{0}]) OVER() AS PagingTotalCount,{1} FROM [{2}] AS {3}{5}"
+                        , defaultField.FieldName, string.Join(","
+                        , FormatQueryFields(queryTranslator.ObjectPetName, fields))
+                        , objectName
+                        , queryTranslator.ObjectPetName
+                        , tranResult.PreScript
+                        , joinScript);
                     if (!tranResult.ConditionString.IsNullOrEmpty())
                     {
                         cmdText.AppendFormat(" WHERE {0}", tranResult.ConditionString);
@@ -559,6 +606,7 @@ namespace EZNEW.Data.SqlServer
             #region execute
 
             StringBuilder cmdText = new StringBuilder();
+            string joinScript = tranResult.AllowJoin ? tranResult.JoinScript : string.Empty;
             switch (cmd.Query.QueryType)
             {
                 case QueryCommandType.Text:
@@ -573,7 +621,13 @@ namespace EZNEW.Data.SqlServer
                     }
                     string objectName = DataManager.GetEntityObjectName(ServerType.SQLServer, cmd.EntityType, cmd.ObjectName);
                     var fields = DataManager.GetFields(ServerType.SQLServer, cmd.EntityType, cmd.Fields);
-                    cmdText.AppendFormat("{4}SELECT {0}({3}.[{1}]) FROM [{2}] AS {3}", funcName, fields[0].FieldName, objectName, queryTranslator.ObjectPetName, tranResult.PreScript);
+                    cmdText.AppendFormat("{4}SELECT {0}({3}.[{1}]) FROM [{2}] AS {3}{5}"
+                        , funcName
+                        , fields[0].FieldName
+                        , objectName
+                        , queryTranslator.ObjectPetName
+                        , tranResult.PreScript
+                        , joinScript);
                     if (!tranResult.ConditionString.IsNullOrEmpty())
                     {
                         cmdText.AppendFormat(" WHERE {0}", tranResult.ConditionString);
