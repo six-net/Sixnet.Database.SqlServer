@@ -12,6 +12,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using EZNEW.Develop.Command.Modify;
+using EZNEW.Framework.Fault;
 
 namespace EZNEW.Data.SqlServer
 {
@@ -43,285 +44,355 @@ namespace EZNEW.Data.SqlServer
         /// <returns>data numbers</returns>
         public async Task<int> ExecuteAsync(ServerInfo server, params ICommand[] cmds)
         {
-            var verifyResults = VerifyCommand(cmds);
-            if (verifyResults.Item2)
-            {
-                return await ExecuteByTransactionAsync(server, verifyResults.Item1).ConfigureAwait(false);
-            }
-            return await ExecuteByNoneTransactionAsync(server, verifyResults.Item1).ConfigureAwait(false);
-        }
+            #region group execute commands
 
-        /// <summary>
-        /// execute by nonee transaction
-        /// </summary>
-        /// <param name="serverInfo">database server</param>
-        /// <param name="cmds">command</param>
-        /// <returns></returns>
-        async Task<int> ExecuteByNoneTransactionAsync(ServerInfo serverInfo, IEnumerable<RdbCommand> cmds)
-        {
-            IQueryTranslator queryTranslator = QueryTranslator.GetTranslator(serverInfo);
-            using (var conn = DbServerFactory.GetConnection(serverInfo))
+            IQueryTranslator translator = QueryTranslator.GetTranslator(server);
+            List<DbExecuteCommand> executeCommands = new List<DbExecuteCommand>();
+            StringBuilder commandTextBuilder = new StringBuilder();
+            CmdParameters parameters = null;
+            int statementsCount = 0;
+            bool forceReturnValue = false;
+            foreach (var cmd in cmds)
             {
-                int executeRows = 0;
-                foreach (var cmd in cmds)
+                DbExecuteCommand executeCommand = GetExecuteDbCommand(translator, cmd as RdbCommand);
+                if (executeCommand == null)
                 {
-                    executeRows += await ExecuteSingleCommandAsync(queryTranslator, conn, cmd).ConfigureAwait(false);
+                    continue;
                 }
-                return executeRows;
+                if (executeCommand.PerformAlone)
+                {
+                    if (statementsCount > 0)
+                    {
+                        executeCommands.Add(new DbExecuteCommand()
+                        {
+                            CommandText = commandTextBuilder.ToString(),
+                            CommandType = CommandType.Text,
+                            ForceReturnValue = true,
+                            Parameters = parameters
+                        });
+                        statementsCount = 0;
+                        translator.ParameterSequence = 0;
+                        commandTextBuilder.Clear();
+                        parameters = null;
+                    }
+                    executeCommands.Add(executeCommand);
+                    continue;
+                }
+                commandTextBuilder.AppendLine(executeCommand.CommandText);
+                parameters = parameters == null ? executeCommand.Parameters : parameters.Union(executeCommand.Parameters);
+                forceReturnValue |= executeCommand.ForceReturnValue;
+                statementsCount++;
+                if (translator.ParameterSequence >= 2000 || statementsCount >= 1000)
+                {
+                    executeCommands.Add(new DbExecuteCommand()
+                    {
+                        CommandText = commandTextBuilder.ToString(),
+                        CommandType = CommandType.Text,
+                        ForceReturnValue = true,
+                        Parameters = parameters
+                    });
+                    statementsCount = 0;
+                    translator.ParameterSequence = 0;
+                    commandTextBuilder.Clear();
+                    parameters = null;
+                }
             }
+            if (statementsCount > 0)
+            {
+                executeCommands.Add(new DbExecuteCommand()
+                {
+                    CommandText = commandTextBuilder.ToString(),
+                    CommandType = CommandType.Text,
+                    ForceReturnValue = true,
+                    Parameters = parameters
+                });
+            }
+
+            #endregion
+
+            return await ExecuteCommandAsync(server, executeCommands, cmds.Length > 1).ConfigureAwait(false);
         }
 
         /// <summary>
-        /// execute by transaction
+        /// execute commands
         /// </summary>
-        /// <param name="serverInfo">database server</param>
-        /// <param name="cmds">commands</param>
+        /// <param name="server">db server</param>
+        /// <param name="executeCommands">execute commands</param>
+        /// <param name="useTransaction">use transaction</param>
         /// <returns></returns>
-        async Task<int> ExecuteByTransactionAsync(ServerInfo serverInfo, IEnumerable<RdbCommand> cmds)
+        async Task<int> ExecuteCommandAsync(ServerInfo server, IEnumerable<DbExecuteCommand> executeCommands, bool useTransaction)
         {
-            IQueryTranslator queryTranslator = QueryTranslator.GetTranslator(serverInfo);
-            using (var conn = DbServerFactory.GetConnection(serverInfo))
+            int resultValue = 0;
+            bool success = true;
+            using (var conn = DbServerFactory.GetConnection(server))
             {
                 conn.Open();
-                var tran = conn.BeginTransaction();
-                bool result = true;
-                int resultValue = 0;
+                IDbTransaction transaction = null;
+                if (useTransaction)
+                {
+                    transaction = conn.BeginTransaction();
+                }
                 try
                 {
-                    foreach (var cmd in cmds)
+                    foreach (var cmd in executeCommands)
                     {
-                        int cmdResult = await ExecuteSingleCommandAsync(queryTranslator, conn, cmd, tran).ConfigureAwait(false);
-                        resultValue += cmdResult;
-                        if (cmd.VerifyResult != null)
+                        var executeResultValue = await conn.ExecuteAsync(cmd.CommandText, ConvertCmdParameters(cmd.Parameters), transaction, commandType: cmd.CommandType).ConfigureAwait(false);
+                        success = success && (cmd.ForceReturnValue ? executeResultValue > 0 : true);
+                        resultValue += executeResultValue;
+                        if (useTransaction && !success)
                         {
-                            result = result && cmd.VerifyResult(cmdResult);
+                            break;
                         }
                     }
-                    if (result)
+                    if (!useTransaction)
                     {
-                        tran.Commit();
+                        return resultValue;
+                    }
+                    if (success)
+                    {
+                        transaction.Commit();
                     }
                     else
                     {
-                        tran.Rollback();
                         resultValue = 0;
+                        transaction.Rollback();
                     }
                     return resultValue;
                 }
                 catch (Exception ex)
                 {
-                    tran.Rollback();
+                    resultValue = 0;
+                    transaction?.Rollback();
                     throw ex;
                 }
             }
         }
 
         /// <summary>
-        /// execute single command
+        /// get execute db command
         /// </summary>
-        /// <param name="conn">db connection</param>
         /// <param name="cmd">command</param>
-        /// <param name="tran">transaction</param>
         /// <returns></returns>
-        async Task<int> ExecuteSingleCommandAsync(IQueryTranslator queryTranslator, IDbConnection conn, RdbCommand cmd, IDbTransaction tran = null)
+        DbExecuteCommand GetExecuteDbCommand(IQueryTranslator queryTranslator, RdbCommand cmd)
         {
-            int resultValue = 0;
+            DbExecuteCommand executeCommand = null;
+            switch (cmd.Operate)
+            {
+                case OperateType.Insert:
+                    executeCommand = GetInsertExecuteDbCommand(queryTranslator, cmd);
+                    break;
+                case OperateType.Update:
+                    executeCommand = GetUpdateExecuteDbCommand(queryTranslator, cmd);
+                    break;
+                case OperateType.Delete:
+                    executeCommand = GetDeleteExecuteDbCommand(queryTranslator, cmd);
+                    break;
+            }
+            return executeCommand;
+        }
 
-            #region query object translate
+        /// <summary>
+        /// get insert execute DbCommand
+        /// </summary>
+        /// <param name="translator">translator</param>
+        /// <param name="cmd">cmd</param>
+        /// <returns></returns>
+        DbExecuteCommand GetInsertExecuteDbCommand(IQueryTranslator translator, RdbCommand cmd)
+        {
+            string cmdText = string.Empty;
+            CmdParameters parameters = null;
+            if (cmd.ExecuteMode == CommandExecuteMode.CommandText)
+            {
+                cmdText = cmd.CommandText;
+                parameters = ParseParameters(cmd.Parameters);
+            }
+            else
+            {
+                string objectName = DataManager.GetEntityObjectName(ServerType.SQLServer, cmd.EntityType, cmd.ObjectName);
+                var fields = DataManager.GetEditFields(ServerType.SQLServer, cmd.EntityType);
+                var insertFormatResult = FormatInsertFields(fields, cmd.Parameters, translator.ParameterSequence);
+                if (insertFormatResult == null)
+                {
+                    return null;
+                }
+                cmdText = string.Format("INSERT INTO [{0}] ({1}) VALUES ({2});"
+                                        , objectName
+                                        , string.Join(",", insertFormatResult.Item1)
+                                        , string.Join(",", insertFormatResult.Item2));
+                parameters = insertFormatResult.Item3;
+                translator.ParameterSequence += fields.Count;
+            }
+            CommandType commandType = GetCommandType(cmd);
+            return new DbExecuteCommand()
+            {
+                CommandText = cmdText,
+                CommandType = commandType,
+                ForceReturnValue = cmd.MustReturnValueOnSuccess,
+                Parameters = parameters
+            };
+        }
 
-            IDictionary<string, object> queryParameters = null;
-            var tranResult = queryTranslator.Translate(cmd.Query);
+        /// <summary>
+        /// get update execute command
+        /// </summary>
+        /// <param name="translator">translator</param>
+        /// <param name="cmd">cmd</param>
+        /// <returns></returns>
+        DbExecuteCommand GetUpdateExecuteDbCommand(IQueryTranslator translator, RdbCommand cmd)
+        {
+            #region query translate
+
+            var tranResult = translator.Translate(cmd.Query);
             string conditionString = string.Empty;
             if (!tranResult.ConditionString.IsNullOrEmpty())
             {
                 conditionString += "WHERE " + tranResult.ConditionString;
-            }
-            if (tranResult.Parameters != null)
-            {
-                if (tranResult.Parameters is IDictionary<string, object>)
-                {
-                    queryParameters = tranResult.Parameters as IDictionary<string, object>;
-                }
-                else
-                {
-                    queryParameters = tranResult.Parameters.ObjectToDcitionary();
-                }
             }
             string preScript = tranResult.PreScript;
             string joinScript = tranResult.AllowJoin ? tranResult.JoinScript : string.Empty;
 
             #endregion
 
-            #region execute
-
-            StringBuilder cmdText = new StringBuilder();
-            object newParameters = cmd.Parameters;
-            ExecuteCommandResult executeCmdResult = cmd.CommandResultType;
+            string cmdText = string.Empty;
+            CmdParameters parameters = ParseParameters(cmd.Parameters);
             if (cmd.ExecuteMode == CommandExecuteMode.CommandText)
             {
-                cmdText.Append(cmd.CommandText);
+                cmdText = cmd.CommandText;
+            }
+            else
+            {
+                parameters = parameters ?? new CmdParameters();
+                string objectName = DataManager.GetEntityObjectName(ServerType.SQLServer, cmd.EntityType, cmd.ObjectName);
+                var fields = GetFields(cmd.EntityType, cmd.Fields);
+                int parameterSequence = translator.ParameterSequence;
+                List<string> updateSetArray = new List<string>();
+                foreach (var field in fields)
+                {
+                    var parameterValue = parameters.GetParameterValue(field.PropertyName);
+                    var parameterName = field.PropertyName;
+                    string newValueExpression = string.Empty;
+                    if (parameterValue != null)
+                    {
+                        parameterSequence++;
+                        parameterName = FormatParameterName(parameterName, parameterSequence);
+                        parameters.Rename(field.PropertyName, parameterName);
+                        if (parameterValue is IModifyValue)
+                        {
+                            var modifyValue = parameterValue as IModifyValue;
+                            parameters.ModifyValue(parameterName, modifyValue.Value);
+                            if (parameterValue is CalculateModifyValue)
+                            {
+                                var calculateModifyValue = parameterValue as CalculateModifyValue;
+                                string calChar = GetCalculateChar(calculateModifyValue.Operator);
+                                newValueExpression = string.Format("{0}.[{1}]{2}@{3}"
+                                                                    , translator.ObjectPetName
+                                                                    , field.FieldName
+                                                                    , calChar
+                                                                    , parameterName);
+                            }
+                        }
+                    }
+                    if (string.IsNullOrWhiteSpace(newValueExpression))
+                    {
+                        newValueExpression = "@" + parameterName;
+                    }
+                    updateSetArray.Add(string.Format("{0}.[{1}]={2}"
+                                                        , translator.ObjectPetName
+                                                        , field.FieldName
+                                                        , newValueExpression));
+                }
+                cmdText = string.Format("{4}UPDATE {0} SET {1} FROM [{2}] AS {0}{5} {3};"
+                    , translator.ObjectPetName
+                    , string.Join(",", updateSetArray.ToArray())
+                    , objectName
+                    , conditionString
+                    , preScript
+                    , joinScript);
+                translator.ParameterSequence = parameterSequence;
+            }
+            //combine parameters
+            if (tranResult.Parameters != null)
+            {
+                var queryParameters = ParseParameters(tranResult.Parameters);
+                if (parameters != null)
+                {
+                    parameters.Union(queryParameters);
+                }
+                else
+                {
+                    parameters = queryParameters;
+                }
+            }
+            CommandType commandType = GetCommandType(cmd);
+            return new DbExecuteCommand()
+            {
+                CommandText = cmdText,
+                CommandType = commandType,
+                ForceReturnValue = cmd.MustReturnValueOnSuccess,
+                Parameters = parameters,
+                HasPreScript = !string.IsNullOrWhiteSpace(preScript)
+            };
+        }
+
+        /// <summary>
+        /// get delete execute command
+        /// </summary>
+        /// <param name="translator">translator</param>
+        /// <param name="cmd">cmd</param>
+        /// <returns></returns>
+        DbExecuteCommand GetDeleteExecuteDbCommand(IQueryTranslator translator, RdbCommand cmd)
+        {
+            #region query translate
+
+            var tranResult = translator.Translate(cmd.Query);
+            string conditionString = string.Empty;
+            if (!tranResult.ConditionString.IsNullOrEmpty())
+            {
+                conditionString += "WHERE " + tranResult.ConditionString;
+            }
+            string preScript = tranResult.PreScript;
+            string joinScript = tranResult.AllowJoin ? tranResult.JoinScript : string.Empty;
+
+            #endregion
+
+            string cmdText = string.Empty;
+            CmdParameters parameters = ParseParameters(cmd.Parameters);
+            if (cmd.ExecuteMode == CommandExecuteMode.CommandText)
+            {
+                cmdText = cmd.CommandText;
             }
             else
             {
                 string objectName = DataManager.GetEntityObjectName(ServerType.SQLServer, cmd.EntityType, cmd.ObjectName);
-                var fields = GetFields(cmd.EntityType, cmd.Fields);
-                switch (cmd.Operate)
-                {
-                    case OperateType.Insert:
-                        cmdText.AppendFormat("INSERT INTO [{0}] ({1}) VALUES ({2})"
-                            , objectName
-                            , string.Join(",", FormatEditFields(fields))
-                            , string.Join(",", fields.Select(c => "@" + c)));
-                        break;
-                    case OperateType.Update:
-                        IDictionary<string, dynamic> oldCmdParameterDict = null;
-                        IDictionary<string, dynamic> newCmdParameterDict = new Dictionary<string, dynamic>();
-                        if (cmd.Parameters is IDictionary<string, IModifyValue>)
-                        {
-                            oldCmdParameterDict = (cmd.Parameters as IDictionary<string, IModifyValue>).ToDictionary<KeyValuePair<string, IModifyValue>, string, dynamic>(c => c.Key, c => c.Value);
-                        }
-                        else if (cmd.Parameters is IDictionary<string, dynamic>)
-                        {
-                            oldCmdParameterDict = cmd.Parameters as IDictionary<string, dynamic>;
-                        }
-                        else if (cmd.Parameters is IDictionary<string, object>)
-                        {
-                            oldCmdParameterDict = cmd.Parameters as IDictionary<string, object>;
-                        }
-                        else
-                        {
-                            oldCmdParameterDict = cmd.Parameters.ObjectToDcitionary();
-                        }
-                        List<string> updateSetArray = new List<string>();
-                        foreach (var field in fields)
-                        {
-                            if (oldCmdParameterDict == null || !oldCmdParameterDict.ContainsKey(field) || !(oldCmdParameterDict[field] is CalculateModifyValue))
-                            {
-                                updateSetArray.Add(string.Format("{0}.[{1}]=@{2}"
-                                    , queryTranslator.ObjectPetName
-                                    , field.FieldName
-                                    , field));
-                                if (oldCmdParameterDict != null && oldCmdParameterDict.ContainsKey(field))
-                                {
-                                    var fieldParameter = oldCmdParameterDict[field];
-                                    dynamic parameterValue = fieldParameter;
-                                    if (fieldParameter is IModifyValue)
-                                    {
-                                        parameterValue = (fieldParameter as IModifyValue).Value;
-                                    }
-                                    newCmdParameterDict.Add(field, parameterValue);
-                                }
-                            }
-                            else if (oldCmdParameterDict[field] is CalculateModifyValue)
-                            {
-                                CalculateModifyValue calModify = oldCmdParameterDict[field] as CalculateModifyValue;
-                                newCmdParameterDict.Add(field, calModify.Value);
-                                string calChar = GetCalculateChar(calModify.Operator);
-                                updateSetArray.Add(string.Format("{0}.[{1}]={0}.[{1}]{2}@{3}"
-                                    , queryTranslator.ObjectPetName
-                                    , field.FieldName
-                                    , calChar
-                                    , field));
-                            }
-                        }
-                        newParameters = newCmdParameterDict;
-                        cmdText.AppendFormat("{4}UPDATE {0} SET {1} FROM [{2}] AS {0}{5} {3}"
-                            , queryTranslator.ObjectPetName
-                            , string.Join(",", updateSetArray.ToArray())
-                            , objectName
-                            , conditionString
-                            , preScript
-                            , joinScript);
-                        break;
-                    case OperateType.Delete:
-                        cmdText.AppendFormat("{3}DELETE {0} FROM [{1}] AS {0}{4} {2}"
-                            , queryTranslator.ObjectPetName
-                            , objectName
-                            , conditionString
-                            , preScript
-                            , joinScript);
-                        break;
-                    case OperateType.Exist:
-                        cmdText.AppendFormat("{5}SELECT 1 WHERE EXISTS(SELECT {0}.[{1}] FROM [{2}] AS {0}{4} {3})"
-                                            , queryTranslator.ObjectPetName
-                                            , fields[0].FieldName
-                                            , objectName
-                                            , conditionString
-                                            , joinScript
-                                            , preScript);
-                        executeCmdResult = ExecuteCommandResult.ExecuteScalar;
-                        break;
-                    default:
-                        break;
-                }
+                cmdText = string.Format("{3}DELETE {0} FROM [{1}] AS {0}{4} {2};"
+                    , translator.ObjectPetName
+                    , objectName
+                    , conditionString
+                    , preScript
+                    , joinScript);
             }
-            if (cmdText.Length <= 0)
+            //combine parameters
+            if (tranResult.Parameters != null)
             {
-                return 0;
-            }
-
-            #endregion
-
-            #region data operation
-
-            object parameters = queryParameters;
-            if (newParameters != null)
-            {
-                CmdParameters cmdParameters = newParameters as CmdParameters;
-                if (cmdParameters != null)
+                var queryParameters = ParseParameters(tranResult.Parameters);
+                if (parameters != null)
                 {
-                    DynamicParameters dynamicParameters = new DynamicParameters();
-                    foreach (var item in cmdParameters.Parameters)
-                    {
-                        dynamicParameters.Add(item.Key, item.Value.Value, item.Value.DbType, item.Value.ParameterDirection, item.Value.Size, item.Value.Precision, item.Value.Scale);
-                    }
-                    if (queryParameters != null)
-                    {
-                        foreach (var parameter in queryParameters)
-                        {
-                            dynamicParameters.Add(parameter.Key, parameter.Value);
-                        }
-                    }
-                    parameters = dynamicParameters;
-                }
-                else if (newParameters is IDictionary<string, dynamic>)
-                {
-                    IDictionary<string, dynamic> cmdParametersDic = newParameters as IDictionary<string, dynamic>;
-                    if (queryParameters != null)
-                    {
-                        foreach (var queryParaItem in queryParameters)
-                        {
-                            cmdParametersDic.Add(queryParaItem.Key, queryParaItem.Value);
-                        }
-                    }
-                    parameters = cmdParametersDic;
+                    parameters.Union(queryParameters);
                 }
                 else
                 {
-                    IDictionary<string, object> cmdParametersDic = newParameters.ObjectToDcitionary();
-                    if (queryParameters != null)
-                    {
-                        foreach (var queryParaItem in queryParameters)
-                        {
-                            cmdParametersDic.Add(queryParaItem.Key, queryParaItem.Value);
-                        }
-                    }
-                    parameters = cmdParametersDic;
+                    parameters = queryParameters;
                 }
             }
-
-            #endregion
-
-            switch (executeCmdResult)
+            CommandType commandType = GetCommandType(cmd);
+            return new DbExecuteCommand()
             {
-                case ExecuteCommandResult.ExecuteScalar:
-                    resultValue = await conn.ExecuteScalarAsync<int>(cmdText.ToString(), parameters, transaction: tran, commandType: GetCommandType(cmd)).ConfigureAwait(false);
-                    break;
-                case ExecuteCommandResult.ExecuteRows:
-                    resultValue = await conn.ExecuteAsync(cmdText.ToString(), parameters, transaction: tran, commandType: GetCommandType(cmd)).ConfigureAwait(false);
-                    break;
-            }
-            return resultValue;
+                CommandText = cmdText,
+                CommandType = commandType,
+                ForceReturnValue = cmd.MustReturnValueOnSuccess,
+                Parameters = parameters,
+                HasPreScript = !string.IsNullOrWhiteSpace(preScript)
+            };
         }
 
         #endregion
@@ -349,13 +420,12 @@ namespace EZNEW.Data.SqlServer
         /// <returns>data list</returns>
         public async Task<IEnumerable<T>> QueryAsync<T>(ServerInfo server, ICommand cmd)
         {
-            var verifyResults = VerifyCommand(cmd);
             cmd.Query = cmd.Query ?? QueryFactory.Create();
 
             #region query object translate
 
-            IQueryTranslator queryTranslator = QueryTranslator.GetTranslator(server);
-            var tranResult = queryTranslator.Translate(cmd.Query);
+            IQueryTranslator translator = QueryTranslator.GetTranslator(server);
+            var tranResult = translator.Translate(cmd.Query);
             string preScript = tranResult.PreScript;
             string joinScript = tranResult.AllowJoin ? tranResult.JoinScript : string.Empty;
 
@@ -373,12 +443,11 @@ namespace EZNEW.Data.SqlServer
                 default:
                     int size = cmd.Query == null ? 0 : cmd.Query.QuerySize;
                     string objectName = DataManager.GetEntityObjectName(ServerType.SQLServer, cmd.EntityType, cmd.ObjectName);
-                    var fields = GetFields(cmd.EntityType, cmd.Fields);
                     cmdText.AppendFormat("{4}SELECT {0} {1} FROM [{2}] AS {3}{5}"
-                        , size > 0 ? "TOP " + size : ""
-                        , string.Join(",", FormatQueryFields(queryTranslator.ObjectPetName, fields))
+                        , size > 0 ? "TOP " + size : string.Empty
+                        , string.Join(",", FormatQueryFields(translator.ObjectPetName, cmd.Query, cmd.EntityType, out var defaultFieldName))
                         , objectName
-                        , queryTranslator.ObjectPetName
+                        , translator.ObjectPetName
                         , preScript
                         , joinScript);
                     if (!tranResult.ConditionString.IsNullOrEmpty())
@@ -396,7 +465,7 @@ namespace EZNEW.Data.SqlServer
 
             using (var conn = DbServerFactory.GetConnection(server))
             {
-                return await conn.QueryAsync<T>(cmdText.ToString(), tranResult.Parameters, commandType: GetCommandType(verifyResults.Item1.First())).ConfigureAwait(false);
+                return await conn.QueryAsync<T>(cmdText.ToString(), tranResult.Parameters, commandType: GetCommandType(cmd as RdbCommand)).ConfigureAwait(false);
             }
         }
 
@@ -457,13 +526,12 @@ namespace EZNEW.Data.SqlServer
         /// <returns></returns>
         public async Task<IEnumerable<T>> QueryOffsetAsync<T>(ServerInfo server, ICommand cmd, int offsetNum = 0, int size = int.MaxValue)
         {
-            var verifyResults = VerifyCommand(cmd);
             cmd.Query = cmd.Query ?? QueryFactory.Create();
 
             #region query object translate
 
-            IQueryTranslator queryTranslator = QueryTranslator.GetTranslator(server);
-            var tranResult = queryTranslator.Translate(cmd.Query);
+            IQueryTranslator translator = QueryTranslator.GetTranslator(server);
+            var tranResult = translator.Translate(cmd.Query);
 
             #endregion
 
@@ -479,13 +547,13 @@ namespace EZNEW.Data.SqlServer
                 case QueryCommandType.QueryObject:
                 default:
                     string objectName = DataManager.GetEntityObjectName(ServerType.SQLServer, cmd.EntityType, cmd.ObjectName);
-                    var fields = GetFields(cmd.EntityType, cmd.Fields);
-                    var defaultField = GetDefaultField(cmd.EntityType, fields);
+                    string defaultFieldName = string.Empty;
+                    List<string> formatQueryFields = FormatQueryFields(translator.ObjectPetName, cmd.Query, cmd.EntityType, out defaultFieldName);
                     cmdText.AppendFormat("{4}SELECT COUNT({3}.[{0}]) OVER() AS PagingTotalCount,{1} FROM [{2}] AS {3}{5}"
-                        , defaultField.FieldName, string.Join(","
-                        , FormatQueryFields(queryTranslator.ObjectPetName, fields))
+                        , defaultFieldName
+                        , string.Join(",", formatQueryFields)
                         , objectName
-                        , queryTranslator.ObjectPetName
+                        , translator.ObjectPetName
                         , tranResult.PreScript
                         , joinScript);
                     if (!tranResult.ConditionString.IsNullOrEmpty())
@@ -498,7 +566,7 @@ namespace EZNEW.Data.SqlServer
                     }
                     else
                     {
-                        cmdText.AppendFormat(" ORDER BY {0}.[{1}] DESC", queryTranslator.ObjectPetName, defaultField.FieldName);
+                        cmdText.AppendFormat(" ORDER BY {0}.[{1}] DESC", translator.ObjectPetName, defaultFieldName);
                     }
                     cmdText.AppendFormat(" OFFSET {0} ROWS FETCH NEXT {1} ROWS ONLY", offsetNum, size);
                     break;
@@ -508,7 +576,7 @@ namespace EZNEW.Data.SqlServer
 
             using (var conn = DbServerFactory.GetConnection(server))
             {
-                return await conn.QueryAsync<T>(cmdText.ToString(), tranResult.Parameters, commandType: GetCommandType(verifyResults.Item1.First())).ConfigureAwait(false);
+                return await conn.QueryAsync<T>(cmdText.ToString(), tranResult.Parameters, commandType: GetCommandType(cmd as RdbCommand)).ConfigureAwait(false);
             }
         }
 
@@ -531,8 +599,35 @@ namespace EZNEW.Data.SqlServer
         /// <returns>data has existed</returns>
         public async Task<bool> QueryAsync(ServerInfo server, ICommand cmd)
         {
-            int value = await ExecuteAsync(server, cmd).ConfigureAwait(false);
-            return value > 0;
+            var translator = QueryTranslator.GetTranslator(server);
+
+            #region query translate
+
+            var tranResult = translator.Translate(cmd.Query);
+            string conditionString = string.Empty;
+            if (!tranResult.ConditionString.IsNullOrEmpty())
+            {
+                conditionString += "WHERE " + tranResult.ConditionString;
+            }
+            string preScript = tranResult.PreScript;
+            string joinScript = tranResult.AllowJoin ? tranResult.JoinScript : string.Empty;
+
+            #endregion
+
+            var field = DataManager.GetDefaultField(ServerType.SQLServer, cmd.EntityType);
+            string objectName = DataManager.GetEntityObjectName(ServerType.SQLServer, cmd.EntityType, cmd.ObjectName);
+            string cmdText = string.Format("{5}SELECT 1 WHERE EXISTS(SELECT {0}.[{1}] FROM [{2}] AS {0}{4} {3})"
+                                , translator.ObjectPetName
+                                , field.FieldName
+                                , objectName
+                                , conditionString
+                                , joinScript
+                                , preScript);
+            using (var conn = DbServerFactory.GetConnection(server))
+            {
+                int value = await conn.ExecuteScalarAsync<int>(cmdText, tranResult.Parameters).ConfigureAwait(false);
+                return value > 0;
+            }
         }
 
         /// <summary>
@@ -593,13 +688,12 @@ namespace EZNEW.Data.SqlServer
         /// <returns></returns>
         async Task<T> AggregateFunctionAsync<T>(ServerInfo server, ICommand cmd)
         {
-            var verifyResults = VerifyCommand(cmd);
             cmd.Query = cmd.Query ?? QueryFactory.Create();
 
             #region query object translate
 
-            IQueryTranslator queryTranslator = QueryTranslator.GetTranslator(server);
-            var tranResult = queryTranslator.Translate(cmd.Query);
+            IQueryTranslator translator = QueryTranslator.GetTranslator(server);
+            var tranResult = translator.Translate(cmd.Query);
 
             #endregion
 
@@ -620,12 +714,16 @@ namespace EZNEW.Data.SqlServer
                         return default(T);
                     }
                     string objectName = DataManager.GetEntityObjectName(ServerType.SQLServer, cmd.EntityType, cmd.ObjectName);
-                    var fields = DataManager.GetFields(ServerType.SQLServer, cmd.EntityType, cmd.Fields);
+                    if (cmd.Query.QueryFields.IsNullOrEmpty())
+                    {
+                        throw new EZNEWException("must set one field");
+                    }
+                    var field = DataManager.GetField(ServerType.SQLServer, cmd.EntityType, cmd.Query.QueryFields[0]);
                     cmdText.AppendFormat("{4}SELECT {0}({3}.[{1}]) FROM [{2}] AS {3}{5}"
                         , funcName
-                        , fields[0].FieldName
+                        , field.FieldName
                         , objectName
-                        , queryTranslator.ObjectPetName
+                        , translator.ObjectPetName
                         , tranResult.PreScript
                         , joinScript);
                     if (!tranResult.ConditionString.IsNullOrEmpty())
@@ -643,43 +741,13 @@ namespace EZNEW.Data.SqlServer
 
             using (var conn = DbServerFactory.GetConnection(server))
             {
-                return await conn.ExecuteScalarAsync<T>(cmdText.ToString(), tranResult.Parameters, commandType: GetCommandType(verifyResults.Item1.First())).ConfigureAwait(false);
+                return await conn.ExecuteScalarAsync<T>(cmdText.ToString(), tranResult.Parameters, commandType: GetCommandType(cmd as RdbCommand)).ConfigureAwait(false);
             }
         }
 
         #endregion
 
         #region Helpers
-
-        /// <summary>
-        /// verify command
-        /// </summary>
-        /// <param name="cmds"></param>
-        Tuple<IEnumerable<RdbCommand>, bool> VerifyCommand(params ICommand[] cmds)
-        {
-            if (cmds == null || !cmds.Any())
-            {
-                throw new Exception("At Least Special One Execute Command");
-            }
-            bool transaction = false;
-            List<RdbCommand> rdbCommandList = new List<RdbCommand>();
-            foreach (var cmd in cmds)
-            {
-                if (cmd == null)
-                {
-                    throw new Exception("Null Command");
-                }
-                RdbCommand rdbCmd = cmd as RdbCommand;
-                if (rdbCmd == null)
-                {
-                    throw new Exception("Command Is Not RDB Command");
-                }
-                transaction = transaction && rdbCmd.TransactionCommand;
-                rdbCommandList.Add(rdbCmd);
-            }
-            transaction = transaction || rdbCommandList.Count > 1;
-            return new Tuple<IEnumerable<RdbCommand>, bool>(rdbCommandList, transaction);
-        }
 
         /// <summary>
         /// get command type
@@ -746,16 +814,25 @@ namespace EZNEW.Data.SqlServer
             return funcName;
         }
 
-        List<string> FormatEditFields(IEnumerable<EntityField> fields)
+        /// <summary>
+        /// format insert fields
+        /// </summary>
+        /// <param name="fields">fields</param>
+        /// <param name="originParameters">origin parameters</param>
+        /// <returns>first:fields,second:parameter fields,third:parameters</returns>
+        Tuple<List<string>, List<string>, CmdParameters> FormatInsertFields(List<EntityField> fields, object parameters, int parameterSequence)
         {
             if (fields.IsNullOrEmpty())
             {
-                return new List<string>(0);
+                return null;
             }
-            List<string> formatFields = new List<string>();
+            List<string> formatFields = new List<string>(fields.Count);
+            List<string> parameterFields = new List<string>(fields.Count);
+            CmdParameters cmdParameters = ParseParameters(parameters);
             string key = ((int)ServerType.SQLServer).ToString();
             foreach (var field in fields)
             {
+                //fields
                 var formatValue = field.GetEditFormat(key);
                 if (formatValue.IsNullOrEmpty())
                 {
@@ -763,8 +840,16 @@ namespace EZNEW.Data.SqlServer
                     field.SetEditFormat(key, formatValue);
                 }
                 formatFields.Add(formatValue);
+
+                //parameter name
+                parameterSequence++;
+                string parameterName = field.PropertyName + parameterSequence;
+                parameterFields.Add("@" + parameterName);
+
+                //parameter value
+                cmdParameters?.Rename(field.PropertyName, parameterName);
             }
-            return formatFields;
+            return new Tuple<List<string>, List<string>, CmdParameters>(formatFields, parameterFields, cmdParameters);
         }
 
         /// <summary>
@@ -772,15 +857,22 @@ namespace EZNEW.Data.SqlServer
         /// </summary>
         /// <param name="fields">fields</param>
         /// <returns></returns>
-        List<string> FormatQueryFields(string dbObjectName, IEnumerable<EntityField> fields)
+        List<string> FormatQueryFields(string dbObjectName, IQuery query, Type entityType, out string defaultFieldName)
         {
-            if (fields.IsNullOrEmpty())
+            defaultFieldName = string.Empty;
+            if (query == null || entityType == null)
             {
                 return new List<string>(0);
             }
+            var queryFields = DataManager.GetQueryFields(ServerType.SQLServer, entityType, query);
+            if (queryFields.IsNullOrEmpty())
+            {
+                return new List<string>(0);
+            }
+            defaultFieldName = queryFields[0].FieldName;
             List<string> formatFields = new List<string>();
             string key = ((int)ServerType.SQLServer).ToString();
-            foreach (var field in fields)
+            foreach (var field in queryFields)
             {
                 var formatValue = field.GetQueryFormat(key);
                 if (formatValue.IsNullOrEmpty())
@@ -817,34 +909,82 @@ namespace EZNEW.Data.SqlServer
         }
 
         /// <summary>
-        /// get default field
+        /// format parameter name
         /// </summary>
-        /// <param name="fields"></param>
+        /// <param name="parameterName">parameter name</param>
+        /// <param name="parameterSequence">parameter sequence</param>
         /// <returns></returns>
-        EntityField GetDefaultField(Type entityType, IEnumerable<EntityField> fields)
+        static string FormatParameterName(string parameterName, int parameterSequence)
         {
-            if (fields.IsNullOrEmpty())
+            return parameterName + parameterSequence;
+        }
+
+        /// <summary>
+        /// parse parameter
+        /// </summary>
+        /// <param name="originParameters">origin parameter</param>
+        /// <returns></returns>
+        CmdParameters ParseParameters(object originParameters)
+        {
+            if (originParameters == null)
             {
-                return string.Empty;
+                return null;
             }
-            if (entityType == null)
+            CmdParameters parameters = originParameters as CmdParameters;
+            if (parameters != null)
             {
-                return fields.ElementAt(0);
+                return parameters;
             }
-            var primaryKeys = EntityManager.GetPrimaryKeys(entityType);
-            if (primaryKeys.IsNullOrEmpty())
+            parameters = new CmdParameters();
+            if (originParameters is IEnumerable<KeyValuePair<string, string>>)
             {
-                return fields.ElementAt(0);
+                var stringParametersDict = originParameters as IEnumerable<KeyValuePair<string, string>>;
+                parameters.Add(stringParametersDict);
             }
-            foreach (var pk in primaryKeys)
+            else if (originParameters is IEnumerable<KeyValuePair<string, dynamic>>)
             {
-                var nowField = fields.FirstOrDefault(c => c == pk);
-                if (nowField != null)
-                {
-                    return nowField;
-                }
+                var dynamicParametersDict = originParameters as IEnumerable<KeyValuePair<string, dynamic>>;
+                parameters.Add(dynamicParametersDict);
             }
-            return fields.ElementAt(0);
+            else if (originParameters is IEnumerable<KeyValuePair<string, object>>)
+            {
+                var objectParametersDict = originParameters as IEnumerable<KeyValuePair<string, object>>;
+                parameters.Add(objectParametersDict);
+            }
+            else if (originParameters is IEnumerable<KeyValuePair<string, IModifyValue>>)
+            {
+                var modifyParametersDict = originParameters as IEnumerable<KeyValuePair<string, IModifyValue>>;
+                parameters.Add(modifyParametersDict);
+            }
+            else
+            {
+                var objectParametersDict = originParameters.ObjectToDcitionary();
+                parameters.Add(objectParametersDict);
+            }
+            return parameters;
+        }
+
+        /// <summary>
+        /// convert cmd parameters
+        /// </summary>
+        /// <param name="cmdParameters">cmd parameters</param>
+        /// <returns></returns>
+        DynamicParameters ConvertCmdParameters(CmdParameters cmdParameters)
+        {
+            if (cmdParameters?.Parameters.IsNullOrEmpty() ?? true)
+            {
+                return null;
+            }
+            DynamicParameters dynamicParameters = new DynamicParameters();
+            foreach (var item in cmdParameters.Parameters)
+            {
+                var parameter = item.Value;
+                dynamicParameters.Add(parameter.Name, parameter.Value
+                                    , parameter.DbType, parameter.ParameterDirection
+                                    , parameter.Size, parameter.Precision
+                                    , parameter.Scale);
+            }
+            return dynamicParameters;
         }
 
         #endregion
