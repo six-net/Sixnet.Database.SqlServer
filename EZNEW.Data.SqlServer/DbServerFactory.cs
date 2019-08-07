@@ -1,4 +1,5 @@
-﻿using System;
+﻿using EZNEW.Data.Config;
+using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.SqlClient;
@@ -20,7 +21,7 @@ namespace EZNEW.Data.SqlServer
         /// <returns>db connection</returns>
         public static IDbConnection GetConnection(ServerInfo server)
         {
-            IDbConnection conn = conn = new SqlConnection(server.ConnectionString);
+            IDbConnection conn = DataManager.GetDBConnection?.Invoke(server) ?? new SqlConnection(server.ConnectionString);
             return conn;
         }
 
