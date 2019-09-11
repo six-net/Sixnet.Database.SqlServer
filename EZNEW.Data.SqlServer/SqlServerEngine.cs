@@ -50,6 +50,11 @@ namespace EZNEW.Data.SqlServer
 
             IQueryTranslator translator = QueryTranslator.GetTranslator(server);
             List<DbExecuteCommand> executeCommands = new List<DbExecuteCommand>();
+            var batchExecuteConfig = DataManager.GetBatchExecuteConfig(server.ServerType) ?? BatchExecuteConfig.Default;
+            var groupStatementsCount = batchExecuteConfig.GroupStatementsCount;
+            groupStatementsCount = groupStatementsCount < 0 ? 1 : groupStatementsCount;
+            var groupParameterCount = batchExecuteConfig.GroupParametersCount;
+            groupParameterCount = groupParameterCount < 0 ? 1 : groupParameterCount;
             StringBuilder commandTextBuilder = new StringBuilder();
             CmdParameters parameters = null;
             int statementsCount = 0;
@@ -84,7 +89,7 @@ namespace EZNEW.Data.SqlServer
                 parameters = parameters == null ? executeCommand.Parameters : parameters.Union(executeCommand.Parameters);
                 forceReturnValue |= executeCommand.ForceReturnValue;
                 statementsCount++;
-                if (translator.ParameterSequence >= 2000 || statementsCount >= 1000)
+                if (translator.ParameterSequence >= groupParameterCount || statementsCount >= groupStatementsCount)
                 {
                     executeCommands.Add(new DbExecuteCommand()
                     {
@@ -470,12 +475,8 @@ namespace EZNEW.Data.SqlServer
 
             using (var conn = DbServerFactory.GetConnection(server))
             {
-                DateTime beginDate = DateTime.Now;
-                var datas= await conn.QueryAsync<T>(cmdText.ToString(), tranResult.Parameters, commandType: GetCommandType(cmd as RdbCommand)).ConfigureAwait(false);
-                DateTime endDate = DateTime.Now;
-                var total = (endDate - beginDate).TotalMilliseconds;
-                return datas;
-
+                var data = await conn.QueryAsync<T>(cmdText.ToString(), tranResult.Parameters, commandType: GetCommandType(cmd as RdbCommand)).ConfigureAwait(false);
+                return data;
             }
         }
 
