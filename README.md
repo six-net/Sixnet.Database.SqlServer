@@ -1,6 +1,6 @@
 # EZNEW.Data.SqlServer
 
-EZNEW.Data.SqlServer is an implementation based on EZNEW.Data for SQLServer database access
+Provides access to SQL Server databases based on the EZNEW development framework
 
 # Reporting issues and bugs
 
