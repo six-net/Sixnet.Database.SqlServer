@@ -13,7 +13,6 @@ using EZNEW.Fault;
 using EZNEW.Develop.DataAccess;
 using EZNEW.Data.Configuration;
 using EZNEW.Dapper;
-using EZNEW.Serialize;
 
 namespace EZNEW.Data.SqlServer
 {
@@ -22,25 +21,6 @@ namespace EZNEW.Data.SqlServer
     /// </summary>
     public class SqlServerEngine : IDatabaseEngine
     {
-        static readonly string FieldFormatKey = ((int)DatabaseServerType.SQLServer).ToString();
-        const string ParameterPrefix = "@";
-        static readonly Dictionary<CalculateOperator, string> CalculateOperatorDictionary = new Dictionary<CalculateOperator, string>(4)
-        {
-            [CalculateOperator.Add] = "+",
-            [CalculateOperator.Subtract] = "-",
-            [CalculateOperator.Multiply] = "*",
-            [CalculateOperator.Divide] = "/",
-        };
-
-        static readonly Dictionary<OperateType, string> AggregateFunctionDictionary = new Dictionary<OperateType, string>(5)
-        {
-            [OperateType.Max] = "MAX",
-            [OperateType.Min] = "MIN",
-            [OperateType.Sum] = "SUM",
-            [OperateType.Avg] = "AVG",
-            [OperateType.Count] = "COUNT",
-        };
-
         #region Execute
 
         /// <summary>
@@ -177,13 +157,13 @@ namespace EZNEW.Data.SqlServer
                 IDbTransaction transaction = null;
                 if (useTransaction)
                 {
-                    transaction = GetExecuteTransaction(conn, executeOption);
+                    transaction = SqlServerFactory.GetExecuteTransaction(conn, executeOption);
                 }
                 try
                 {
                     foreach (var cmd in executeCommands)
                     {
-                        var cmdDefinition = new CommandDefinition(cmd.CommandText, ConvertCmdParameters(cmd.Parameters), transaction: transaction, commandType: cmd.CommandType, cancellationToken: executeOption?.CancellationToken ?? default);
+                        var cmdDefinition = new CommandDefinition(cmd.CommandText, SqlServerFactory.ConvertCmdParameters(cmd.Parameters), transaction: transaction, commandType: cmd.CommandType, cancellationToken: executeOption?.CancellationToken ?? default);
                         var executeResultValue = await conn.ExecuteAsync(cmdDefinition).ConfigureAwait(false);
                         success = success && (cmd.ForceReturnValue ? executeResultValue > 0 : true);
                         resultValue += executeResultValue;
@@ -228,8 +208,8 @@ namespace EZNEW.Data.SqlServer
                 return new DatabaseExecuteCommand()
                 {
                     CommandText = command.CommandText,
-                    Parameters = ParseParameters(command.Parameters),
-                    CommandType = GetCommandType(command),
+                    Parameters = SqlServerFactory.ParseParameters(command.Parameters),
+                    CommandType = SqlServerFactory.GetCommandType(command),
                     ForceReturnValue = command.MustReturnValueOnSuccess,
                     HasPreScript = true
                 };
@@ -267,18 +247,19 @@ namespace EZNEW.Data.SqlServer
         {
             string objectName = DataManager.GetEntityObjectName(DatabaseServerType.SQLServer, command.EntityType, command.ObjectName);
             var fields = DataManager.GetEditFields(DatabaseServerType.SQLServer, command.EntityType);
-            var insertFormatResult = FormatInsertFields(fields, command.Parameters, translator.ParameterSequence);
+            var fieldCount = fields.GetCount();
+            var insertFormatResult = SqlServerFactory.FormatInsertFields(fieldCount, fields, command.Parameters, translator.ParameterSequence);
             if (insertFormatResult == null)
             {
                 return null;
             }
             string cmdText = $"INSERT INTO [{objectName}] ({string.Join(",", insertFormatResult.Item1)}) VALUES ({string.Join(",", insertFormatResult.Item2)});";
             CommandParameters parameters = insertFormatResult.Item3;
-            translator.ParameterSequence += fields.Count;
+            translator.ParameterSequence += fieldCount;
             return new DatabaseExecuteCommand()
             {
                 CommandText = cmdText,
-                CommandType = GetCommandType(command),
+                CommandType = SqlServerFactory.GetCommandType(command),
                 ForceReturnValue = command.MustReturnValueOnSuccess,
                 Parameters = parameters
             };
@@ -307,9 +288,9 @@ namespace EZNEW.Data.SqlServer
 
             #region script
 
-            CommandParameters parameters = ParseParameters(command.Parameters) ?? new CommandParameters();
+            CommandParameters parameters = SqlServerFactory.ParseParameters(command.Parameters) ?? new CommandParameters();
             string objectName = DataManager.GetEntityObjectName(DatabaseServerType.SQLServer, command.EntityType, command.ObjectName);
-            var fields = GetFields(command.EntityType, command.Fields);
+            var fields = SqlServerFactory.GetFields(command.EntityType, command.Fields);
             int parameterSequence = translator.ParameterSequence;
             List<string> updateSetArray = new List<string>();
             foreach (var field in fields)
@@ -320,7 +301,7 @@ namespace EZNEW.Data.SqlServer
                 if (parameterValue != null)
                 {
                     parameterSequence++;
-                    parameterName = FormatParameterName(parameterName, parameterSequence);
+                    parameterName = SqlServerFactory.FormatParameterName(parameterName, parameterSequence);
                     parameters.Rename(field.PropertyName, parameterName);
                     if (parameterValue is IModifyValue)
                     {
@@ -329,14 +310,14 @@ namespace EZNEW.Data.SqlServer
                         if (parameterValue is CalculateModifyValue)
                         {
                             var calculateModifyValue = parameterValue as CalculateModifyValue;
-                            string calChar = GetCalculateChar(calculateModifyValue.Operator);
-                            newValueExpression = $"{translator.ObjectPetName}.[{field.FieldName}]{calChar}{ParameterPrefix}{parameterName}";
+                            string calChar = SqlServerFactory.GetCalculateChar(calculateModifyValue.Operator);
+                            newValueExpression = $"{translator.ObjectPetName}.[{field.FieldName}]{calChar}{SqlServerFactory.ParameterPrefix}{parameterName}";
                         }
                     }
                 }
                 if (string.IsNullOrWhiteSpace(newValueExpression))
                 {
-                    newValueExpression = $"{ParameterPrefix}{parameterName}";
+                    newValueExpression = $"{SqlServerFactory.ParameterPrefix}{parameterName}";
                 }
                 updateSetArray.Add($"{translator.ObjectPetName}.[{field.FieldName}]={newValueExpression}");
             }
@@ -347,7 +328,7 @@ namespace EZNEW.Data.SqlServer
 
             #region parameter
 
-            var queryParameters = ParseParameters(tranResult.Parameters);
+            var queryParameters = SqlServerFactory.ParseParameters(tranResult.Parameters);
             parameters.Union(queryParameters);
 
             #endregion
@@ -355,7 +336,7 @@ namespace EZNEW.Data.SqlServer
             return new DatabaseExecuteCommand()
             {
                 CommandText = cmdText,
-                CommandType = GetCommandType(command),
+                CommandType = SqlServerFactory.GetCommandType(command),
                 ForceReturnValue = command.MustReturnValueOnSuccess,
                 Parameters = parameters,
                 HasPreScript = !string.IsNullOrWhiteSpace(preScript)
@@ -392,8 +373,8 @@ namespace EZNEW.Data.SqlServer
 
             #region parameter
 
-            CommandParameters parameters = ParseParameters(command.Parameters) ?? new CommandParameters();
-            var queryParameters = ParseParameters(tranResult.Parameters);
+            CommandParameters parameters = SqlServerFactory.ParseParameters(command.Parameters) ?? new CommandParameters();
+            var queryParameters = SqlServerFactory.ParseParameters(tranResult.Parameters);
             parameters.Union(queryParameters);
 
             #endregion
@@ -401,7 +382,7 @@ namespace EZNEW.Data.SqlServer
             return new DatabaseExecuteCommand()
             {
                 CommandText = cmdText,
-                CommandType = GetCommandType(command),
+                CommandType = SqlServerFactory.GetCommandType(command),
                 ForceReturnValue = command.MustReturnValueOnSuccess,
                 Parameters = parameters,
                 HasPreScript = !string.IsNullOrWhiteSpace(preScript)
@@ -459,7 +440,18 @@ namespace EZNEW.Data.SqlServer
                 default:
                     int size = command.Query.QuerySize;
                     string objectName = DataManager.GetEntityObjectName(DatabaseServerType.SQLServer, command.EntityType, command.ObjectName);
-                    cmdText = $"{preScript}SELECT {(size > 0 ? $"TOP {size}" : string.Empty)} {string.Join(",", FormatQueryFields(translator.ObjectPetName, command.Query, command.EntityType, out var defaultFieldName))} FROM [{objectName}] AS {translator.ObjectPetName} {joinScript} {(string.IsNullOrWhiteSpace(tranResult.ConditionString) ? string.Empty : $"WHERE {tranResult.ConditionString}")} {(string.IsNullOrWhiteSpace(tranResult.OrderString) ? string.Empty : $"ORDER BY {tranResult.OrderString}")}";
+                    string orderString = string.IsNullOrWhiteSpace(tranResult.OrderString) ? string.Empty : $"ORDER BY {tranResult.OrderString}";
+                    var queryFields = SqlServerFactory.GetQueryFields(command.Query, command.EntityType, true);
+                    string outputFormatedField = string.Join(",", SqlServerFactory.FormatQueryFields(translator.ObjectPetName, queryFields, true));
+                    if (string.IsNullOrWhiteSpace(tranResult.CombineScript))
+                    {
+                        cmdText = $"{preScript}SELECT {(size > 0 ? $"TOP {size}" : string.Empty)} {outputFormatedField} FROM [{objectName}] AS {translator.ObjectPetName} {joinScript} {(string.IsNullOrWhiteSpace(tranResult.ConditionString) ? string.Empty : $"WHERE {tranResult.ConditionString}")} {orderString}";
+                    }
+                    else
+                    {
+                        string innerFormatedField = string.Join(",", SqlServerFactory.FormatQueryFields(translator.ObjectPetName, queryFields, false));
+                        cmdText = $"{preScript}SELECT {(size > 0 ? $"TOP {size}" : string.Empty)} {outputFormatedField} FROM (SELECT {innerFormatedField} FROM [{objectName}] AS {translator.ObjectPetName} {joinScript} {(string.IsNullOrWhiteSpace(tranResult.ConditionString) ? string.Empty : $"WHERE {tranResult.ConditionString}")} {tranResult.CombineScript}) AS {translator.ObjectPetName} {orderString}";
+                    }
                     break;
             }
 
@@ -467,7 +459,7 @@ namespace EZNEW.Data.SqlServer
 
             #region parameter
 
-            var parameters = ConvertCmdParameters(ParseParameters(tranResult.Parameters));
+            var parameters = SqlServerFactory.ConvertCmdParameters(SqlServerFactory.ParseParameters(tranResult.Parameters));
 
             #endregion
 
@@ -476,8 +468,8 @@ namespace EZNEW.Data.SqlServer
 
             using (var conn = SqlServerFactory.GetConnection(server))
             {
-                var tran = GetQueryTransaction(conn, command.Query);
-                var cmdDefinition = new CommandDefinition(cmdText, parameters, transaction: tran, commandType: GetCommandType(command as RdbCommand), cancellationToken: command.Query?.GetCancellationToken() ?? default);
+                var tran = SqlServerFactory.GetQueryTransaction(conn, command.Query);
+                var cmdDefinition = new CommandDefinition(cmdText, parameters, transaction: tran, commandType: SqlServerFactory.GetCommandType(command as RdbCommand), cancellationToken: command.Query?.GetCancellationToken() ?? default);
                 var data = await conn.QueryAsync<T>(cmdDefinition).ConfigureAwait(false);
                 return data;
             }
@@ -564,8 +556,18 @@ namespace EZNEW.Data.SqlServer
                 case QueryCommandType.QueryObject:
                 default:
                     string objectName = DataManager.GetEntityObjectName(DatabaseServerType.SQLServer, command.EntityType, command.ObjectName);
-                    List<string> formatQueryFields = FormatQueryFields(translator.ObjectPetName, command.Query, command.EntityType, out var defaultFieldName);
-                    cmdText = $"{tranResult.PreScript}SELECT COUNT({translator.ObjectPetName}.[{defaultFieldName}]) OVER() AS QueryDataTotalCount,{string.Join(",", formatQueryFields)} FROM [{objectName}] AS {translator.ObjectPetName} {joinScript} {(string.IsNullOrWhiteSpace(tranResult.ConditionString) ? string.Empty : $"WHERE {tranResult.ConditionString}")} ORDER BY {(string.IsNullOrWhiteSpace(tranResult.OrderString) ? $"{translator.ObjectPetName}.[{defaultFieldName}] DESC" : tranResult.OrderString)} OFFSET {offsetNum} ROWS FETCH NEXT {size} ROWS ONLY";
+                    var defaultFieldName = SqlServerFactory.GetDefaultFieldName(command.EntityType);
+                    var queryFields = SqlServerFactory.GetQueryFields(command.Query, command.EntityType, true);
+                    var outputFormatedField = string.Join(",", SqlServerFactory.FormatQueryFields(translator.ObjectPetName, queryFields, true));
+                    if (string.IsNullOrWhiteSpace(tranResult.CombineScript))
+                    {
+                        cmdText = $"{tranResult.PreScript}SELECT COUNT({translator.ObjectPetName}.[{defaultFieldName}]) OVER() AS QueryDataTotalCount,{outputFormatedField} FROM [{objectName}] AS {translator.ObjectPetName} {joinScript} {(string.IsNullOrWhiteSpace(tranResult.ConditionString) ? string.Empty : $"WHERE {tranResult.ConditionString}")} ORDER BY {(string.IsNullOrWhiteSpace(tranResult.OrderString) ? $"{translator.ObjectPetName}.[{defaultFieldName}] DESC" : tranResult.OrderString)} OFFSET {offsetNum} ROWS FETCH NEXT {size} ROWS ONLY";
+                    }
+                    else
+                    {
+                        var innerFormatedField = string.Join(",", SqlServerFactory.FormatQueryFields(translator.ObjectPetName, queryFields, false));
+                        cmdText = $"{tranResult.PreScript}SELECT COUNT({translator.ObjectPetName}.[{defaultFieldName}]) OVER() AS QueryDataTotalCount,{outputFormatedField} FROM (SELECT {innerFormatedField} FROM [{objectName}] AS {translator.ObjectPetName} {joinScript} {(string.IsNullOrWhiteSpace(tranResult.ConditionString) ? string.Empty : $"WHERE {tranResult.ConditionString}")} {tranResult.CombineScript}) AS {translator.ObjectPetName} ORDER BY {(string.IsNullOrWhiteSpace(tranResult.OrderString) ? $"{translator.ObjectPetName}.[{defaultFieldName}] DESC" : tranResult.OrderString)} OFFSET {offsetNum} ROWS FETCH NEXT {size} ROWS ONLY";
+                    }
                     break;
             }
 
@@ -573,7 +575,7 @@ namespace EZNEW.Data.SqlServer
 
             #region parameter
 
-            var parameters = ConvertCmdParameters(ParseParameters(tranResult.Parameters));
+            var parameters = SqlServerFactory.ConvertCmdParameters(SqlServerFactory.ParseParameters(tranResult.Parameters));
 
             #endregion
 
@@ -582,8 +584,8 @@ namespace EZNEW.Data.SqlServer
 
             using (var conn = SqlServerFactory.GetConnection(server))
             {
-                var tran = GetQueryTransaction(conn, command.Query);
-                var cmdDefinition = new CommandDefinition(cmdText, parameters, transaction: tran, commandType: GetCommandType(command as RdbCommand), cancellationToken: command.Query?.GetCancellationToken() ?? default);
+                var tran = SqlServerFactory.GetQueryTransaction(conn, command.Query);
+                var cmdDefinition = new CommandDefinition(cmdText, parameters, transaction: tran, commandType: SqlServerFactory.GetCommandType(command as RdbCommand), cancellationToken: command.Query?.GetCancellationToken() ?? default);
                 return await conn.QueryAsync<T>(cmdDefinition).ConfigureAwait(false);
             }
         }
@@ -611,12 +613,15 @@ namespace EZNEW.Data.SqlServer
 
             #region query translate
 
-            var tranResult = translator.Translate(command.Query);
-            string conditionString = string.Empty;
-            if (!string.IsNullOrWhiteSpace(tranResult.ConditionString))
+            command.Query.ClearQueryFields();
+            var queryFields = EntityManager.GetPrimaryKeys(command.EntityType).ToArray();
+            if (queryFields.IsNullOrEmpty())
             {
-                conditionString += "WHERE " + tranResult.ConditionString;
+                queryFields = EntityManager.GetQueryFields(command.EntityType).ToArray();
             }
+            command.Query.AddQueryFields(queryFields);
+            var tranResult = translator.Translate(command.Query);
+            string conditionString = string.IsNullOrWhiteSpace(tranResult.ConditionString) ? string.Empty : $"WHERE {tranResult.ConditionString}";
             string preScript = tranResult.PreScript;
             string joinScript = tranResult.AllowJoin ? tranResult.JoinScript : string.Empty;
 
@@ -624,15 +629,15 @@ namespace EZNEW.Data.SqlServer
 
             #region script
 
-            var field = DataManager.GetDefaultField(DatabaseServerType.SQLServer, command.EntityType);
             string objectName = DataManager.GetEntityObjectName(DatabaseServerType.SQLServer, command.EntityType, command.ObjectName);
-            string cmdText = $"{preScript}SELECT 1 WHERE EXISTS(SELECT {translator.ObjectPetName}.[{field.FieldName}] FROM [{objectName}] AS {translator.ObjectPetName} {joinScript} {conditionString})";
+            string formatedField = string.Join(",", SqlServerFactory.FormatQueryFields(translator.ObjectPetName, command.Query, command.EntityType, true, false));
+            string cmdText = $"{preScript}SELECT 1 WHERE EXISTS(SELECT {formatedField} FROM [{objectName}] AS {translator.ObjectPetName} {joinScript} {conditionString} {tranResult.CombineScript})";
 
             #endregion
 
             #region parameter
 
-            var parameters = ConvertCmdParameters(ParseParameters(tranResult.Parameters));
+            var parameters = SqlServerFactory.ConvertCmdParameters(SqlServerFactory.ParseParameters(tranResult.Parameters));
 
             #endregion
 
@@ -641,7 +646,7 @@ namespace EZNEW.Data.SqlServer
 
             using (var conn = SqlServerFactory.GetConnection(server))
             {
-                var tran = GetQueryTransaction(conn, command.Query);
+                var tran = SqlServerFactory.GetQueryTransaction(conn, command.Query);
                 var cmdDefinition = new CommandDefinition(cmdText, parameters, transaction: tran, cancellationToken: command.Query?.GetCancellationToken() ?? default);
                 int value = await conn.ExecuteScalarAsync<int>(cmdDefinition).ConfigureAwait(false);
                 return value > 0;
@@ -676,6 +681,52 @@ namespace EZNEW.Data.SqlServer
 
             #region query translate
 
+            bool queryObject = command.Query.QueryType == QueryCommandType.QueryObject;
+            string funcName = SqlServerFactory.GetAggregateFunctionName(command.OperateType);
+            EntityField defaultField = null;
+            if (queryObject)
+            {
+                if (string.IsNullOrWhiteSpace(funcName))
+                {
+                    throw new NotSupportedException($"Not support {command.OperateType}");
+                }
+                if (SqlServerFactory.AggregateOperateMustNeedField(command.OperateType))
+                {
+                    if (queryObject && (command.Query?.QueryFields.IsNullOrEmpty() ?? true))
+                    {
+                        throw new EZNEWException($"You must specify the field to perform for the {funcName} operation");
+                    }
+                    else
+                    {
+                        defaultField = DataManager.GetField(DatabaseServerType.SQLServer, command.EntityType, command.Query.QueryFields.First());
+                    }
+                }
+                else
+                {
+                    defaultField = DataManager.GetDefaultField(DatabaseServerType.SQLServer, command.EntityType);
+                }
+
+                //combine fields
+                if (!command.Query.CombineItems.IsNullOrEmpty())
+                {
+                    var combineKeys = EntityManager.GetPrimaryKeys(command.EntityType).Union(new string[1] { defaultField.PropertyName }).ToArray();
+                    command.Query.ClearQueryFields();
+                    foreach (var combineItem in command.Query.CombineItems)
+                    {
+                        combineItem.CombineQuery.ClearQueryFields();
+                        if (combineKeys.IsNullOrEmpty())
+                        {
+                            combineItem.CombineQuery.ClearNotQueryFields();
+                            command.Query.ClearNotQueryFields();
+                        }
+                        else
+                        {
+                            combineItem.CombineQuery.AddQueryFields(combineKeys);
+                            command.Query.AddQueryFields(combineKeys);
+                        }
+                    }
+                }
+            }
             IQueryTranslator translator = SqlServerFactory.GetQueryTranslator(server);
             var tranResult = translator.Translate(command.Query);
 
@@ -692,35 +743,11 @@ namespace EZNEW.Data.SqlServer
                     break;
                 case QueryCommandType.QueryObject:
                 default:
-                    string funcName = GetAggregateFunctionName(command.OperateType);
-                    if (string.IsNullOrWhiteSpace(funcName))
-                    {
-                        return default;
-                    }
-
-                    #region field
-
-                    EntityField field;
-                    if (AggregateOperateMustNeedField(command.OperateType))
-                    {
-                        if (command.Query?.QueryFields.IsNullOrEmpty() ?? true)
-                        {
-                            throw new EZNEWException($"You must specify the field to perform for the {funcName} operation");
-                        }
-                        else
-                        {
-                            field = DataManager.GetField(DatabaseServerType.SQLServer, command.EntityType, command.Query.QueryFields.First());
-                        }
-                    }
-                    else
-                    {
-                        field = DataManager.GetDefaultField(DatabaseServerType.SQLServer, command.EntityType);
-                    }
-
-                    #endregion
-
                     string objectName = DataManager.GetEntityObjectName(DatabaseServerType.SQLServer, command.EntityType, command.ObjectName);
-                    cmdText = $"{tranResult.PreScript}SELECT {funcName}({FormatField(translator.ObjectPetName, field)}) FROM [{objectName}] AS {translator.ObjectPetName} {joinScript} {(string.IsNullOrWhiteSpace(tranResult.ConditionString) ? string.Empty : $"WHERE {tranResult.ConditionString}")} {(string.IsNullOrWhiteSpace(tranResult.OrderString) ? string.Empty : $"ORDER BY {tranResult.OrderString}")}";
+                    string formatedDefaultField = SqlServerFactory.FormatField(translator.ObjectPetName, defaultField, false);
+                    cmdText = string.IsNullOrWhiteSpace(tranResult.CombineScript)
+                        ? $"{tranResult.PreScript}SELECT {funcName}({formatedDefaultField}) FROM [{objectName}] AS {translator.ObjectPetName} {joinScript} {(string.IsNullOrWhiteSpace(tranResult.ConditionString) ? string.Empty : $"WHERE {tranResult.ConditionString}")}"
+                        : $"{tranResult.PreScript}SELECT {funcName}({formatedDefaultField}) FROM (SELECT {string.Join(",", SqlServerFactory.FormatQueryFields(translator.ObjectPetName, command.Query, command.EntityType, true, false))} FROM [{objectName}] AS {translator.ObjectPetName} {joinScript} {(string.IsNullOrWhiteSpace(tranResult.ConditionString) ? string.Empty : $"WHERE {tranResult.ConditionString}")} {tranResult.CombineScript}) AS {translator.ObjectPetName}";
                     break;
             }
 
@@ -728,7 +755,7 @@ namespace EZNEW.Data.SqlServer
 
             #region parameter
 
-            var parameters = ConvertCmdParameters(ParseParameters(tranResult.Parameters));
+            var parameters = SqlServerFactory.ConvertCmdParameters(SqlServerFactory.ParseParameters(tranResult.Parameters));
 
             #endregion
 
@@ -737,8 +764,8 @@ namespace EZNEW.Data.SqlServer
 
             using (var conn = SqlServerFactory.GetConnection(server))
             {
-                var tran = GetQueryTransaction(conn, command.Query);
-                var cmdDefinition = new CommandDefinition(cmdText, parameters, transaction: tran, commandType: GetCommandType(command as RdbCommand), cancellationToken: command.Query?.GetCancellationToken() ?? default);
+                var tran = SqlServerFactory.GetQueryTransaction(conn, command.Query);
+                var cmdDefinition = new CommandDefinition(cmdText, parameters, transaction: tran, commandType: SqlServerFactory.GetCommandType(command as RdbCommand), cancellationToken: command.Query?.GetCancellationToken() ?? default);
                 return await conn.ExecuteScalarAsync<T>(cmdDefinition).ConfigureAwait(false);
             }
         }
@@ -755,9 +782,9 @@ namespace EZNEW.Data.SqlServer
             SqlServerFactory.LogScript(command.CommandText, command.Parameters);
             using (var conn = SqlServerFactory.GetConnection(server))
             {
-                var tran = GetQueryTransaction(conn, command.Query);
-                DynamicParameters parameters = ConvertCmdParameters(ParseParameters(command.Parameters));
-                var cmdDefinition = new CommandDefinition(command.CommandText, parameters, transaction: tran, commandType: GetCommandType(command as RdbCommand), cancellationToken: command.Query?.GetCancellationToken() ?? default);
+                var tran = SqlServerFactory.GetQueryTransaction(conn, command.Query);
+                DynamicParameters parameters = SqlServerFactory.ConvertCmdParameters(SqlServerFactory.ParseParameters(command.Parameters));
+                var cmdDefinition = new CommandDefinition(command.CommandText, parameters, transaction: tran, commandType: SqlServerFactory.GetCommandType(command as RdbCommand), cancellationToken: command.Query?.GetCancellationToken() ?? default);
                 using (var reader = await conn.ExecuteReaderAsync(cmdDefinition).ConfigureAwait(false))
                 {
                     DataSet dataSet = new DataSet();
@@ -770,299 +797,6 @@ namespace EZNEW.Data.SqlServer
                     return dataSet;
                 }
             }
-        }
-
-        #endregion
-
-        #region Util
-
-        /// <summary>
-        /// Get command type
-        /// </summary>
-        /// <param name="command">Command</param>
-        /// <returns>Return command type</returns>
-        CommandType GetCommandType(RdbCommand command)
-        {
-            return command.CommandType == CommandTextType.Procedure ? CommandType.StoredProcedure : CommandType.Text;
-        }
-
-        /// <summary>
-        /// Get calculate sign
-        /// </summary>
-        /// <param name="calculate">Calculate operator</param>
-        /// <returns>Return calculate char</returns>
-        string GetCalculateChar(CalculateOperator calculate)
-        {
-            CalculateOperatorDictionary.TryGetValue(calculate, out var opearterChar);
-            return opearterChar;
-        }
-
-        /// <summary>
-        /// Get aggregate function name
-        /// </summary>
-        /// <param name="funcType">Function type</param>
-        /// <returns>Return aggregate function name</returns>
-        string GetAggregateFunctionName(OperateType funcType)
-        {
-            AggregateFunctionDictionary.TryGetValue(funcType, out var funcName);
-            return funcName;
-        }
-
-        /// <summary>
-        /// Aggregate operate must need field
-        /// </summary>
-        /// <param name="operateType">Operate type</param>
-        /// <returns></returns>
-        bool AggregateOperateMustNeedField(OperateType operateType)
-        {
-            return operateType != OperateType.Count;
-        }
-
-        /// <summary>
-        /// Format insert fields
-        /// </summary>
-        /// <param name="fields">Fields</param>
-        /// <param name="parameters">Parameters</param>
-        /// <returns>first:fields,second:parameter fields,third:parameters</returns>
-        Tuple<List<string>, List<string>, CommandParameters> FormatInsertFields(List<EntityField> fields, object parameters, int parameterSequence)
-        {
-            if (fields.IsNullOrEmpty())
-            {
-                return null;
-            }
-            List<string> formatFields = new List<string>(fields.Count);
-            List<string> parameterFields = new List<string>(fields.Count);
-            CommandParameters cmdParameters = ParseParameters(parameters);
-            foreach (var field in fields)
-            {
-                //fields
-                var formatValue = field.GetEditFormat(FieldFormatKey);
-                if (string.IsNullOrWhiteSpace(formatValue))
-                {
-                    formatValue = $"[{field.FieldName}]";
-                    field.SetEditFormat(FieldFormatKey, formatValue);
-                }
-                formatFields.Add(formatValue);
-
-                //parameter name
-                parameterSequence++;
-                string parameterName = field.PropertyName + parameterSequence;
-                parameterFields.Add($"{ParameterPrefix}{parameterName}");
-
-                //parameter value
-                cmdParameters?.Rename(field.PropertyName, parameterName);
-            }
-            return new Tuple<List<string>, List<string>, CommandParameters>(formatFields, parameterFields, cmdParameters);
-        }
-
-        /// <summary>
-        /// Format fields
-        /// </summary>
-        /// <param name="fields">Fields</param>
-        /// <returns>Return query fields</returns>
-        List<string> FormatQueryFields(string dbObjectName, IQuery query, Type entityType, out string defaultFieldName)
-        {
-            defaultFieldName = string.Empty;
-            if (query == null || entityType == null)
-            {
-                return new List<string>(0);
-            }
-            var queryFields = DataManager.GetQueryFields(DatabaseServerType.SQLServer, entityType, query);
-            if (queryFields.IsNullOrEmpty())
-            {
-                return new List<string>(0);
-            }
-            defaultFieldName = queryFields[0].FieldName;
-            List<string> formatFields = new List<string>();
-            foreach (var field in queryFields)
-            {
-                var formatValue = FormatField(dbObjectName, field);
-                formatFields.Add(formatValue);
-            }
-            return formatFields;
-        }
-
-        /// <summary>
-        /// Format field
-        /// </summary>
-        /// <param name="databaseObjectName">Database object name</param>
-        /// <param name="field">Field</param>
-        /// <returns>Return field format value</returns>
-        string FormatField(string databaseObjectName, EntityField field)
-        {
-            if (field == null)
-            {
-                return string.Empty;
-            }
-            var formatValue = field.GetQueryFormat(FieldFormatKey);
-            if (string.IsNullOrWhiteSpace(formatValue))
-            {
-                string fieldName = $"{databaseObjectName}.[{field.FieldName}]";
-                if (!string.IsNullOrWhiteSpace(field.QueryFormat))
-                {
-                    formatValue = string.Format(field.QueryFormat + " AS [{1}]", fieldName, field.PropertyName);
-                }
-                else if (field.FieldName != field.PropertyName)
-                {
-                    formatValue = $"{fieldName} AS [{field.PropertyName}]";
-                }
-                else
-                {
-                    formatValue = fieldName;
-                }
-                field.SetQueryFormat(FieldFormatKey, formatValue);
-            }
-            return formatValue;
-        }
-
-        /// <summary>
-        /// Get fields
-        /// </summary>
-        /// <param name="entityType">Entity type</param>
-        /// <param name="propertyNames">Property names</param>
-        /// <returns>Return fields</returns>
-        List<EntityField> GetFields(Type entityType, IEnumerable<string> propertyNames)
-        {
-            return DataManager.GetFields(DatabaseServerType.SQLServer, entityType, propertyNames);
-        }
-
-        /// <summary>
-        /// Format parameter name
-        /// </summary>
-        /// <param name="parameterName">Parameter name</param>
-        /// <param name="parameterSequence">Parameter sequence</param>
-        /// <returns>Return parameter name</returns>
-        static string FormatParameterName(string parameterName, int parameterSequence)
-        {
-            return parameterName + parameterSequence;
-        }
-
-        /// <summary>
-        /// Parse parameter
-        /// </summary>
-        /// <param name="originalParameters">Original parameter</param>
-        /// <returns>Return command parameters</returns>
-        CommandParameters ParseParameters(object originalParameters)
-        {
-            if (originalParameters == null)
-            {
-                return null;
-            }
-            CommandParameters parameters = originalParameters as CommandParameters;
-            if (parameters != null)
-            {
-                return parameters;
-            }
-            parameters = new CommandParameters();
-            if (originalParameters is IEnumerable<KeyValuePair<string, string>>)
-            {
-                var stringParametersDict = originalParameters as IEnumerable<KeyValuePair<string, string>>;
-                parameters.Add(stringParametersDict);
-            }
-            else if (originalParameters is IEnumerable<KeyValuePair<string, dynamic>>)
-            {
-                var dynamicParametersDict = originalParameters as IEnumerable<KeyValuePair<string, dynamic>>;
-                parameters.Add(dynamicParametersDict);
-            }
-            else if (originalParameters is IEnumerable<KeyValuePair<string, object>>)
-            {
-                var objectParametersDict = originalParameters as IEnumerable<KeyValuePair<string, object>>;
-                parameters.Add(objectParametersDict);
-            }
-            else if (originalParameters is IEnumerable<KeyValuePair<string, IModifyValue>>)
-            {
-                var modifyParametersDict = originalParameters as IEnumerable<KeyValuePair<string, IModifyValue>>;
-                parameters.Add(modifyParametersDict);
-            }
-            else
-            {
-                var objectParametersDict = originalParameters.ObjectToDcitionary();
-                parameters.Add(objectParametersDict);
-            }
-            return parameters;
-        }
-
-        /// <summary>
-        /// Convert cmd parameters
-        /// </summary>
-        /// <param name="commandParameters">Command parameters</param>
-        /// <returns>Return dynamic parameters</returns>
-        DynamicParameters ConvertCmdParameters(CommandParameters commandParameters)
-        {
-            if (commandParameters?.Parameters.IsNullOrEmpty() ?? true)
-            {
-                return null;
-            }
-            DynamicParameters dynamicParameters = new DynamicParameters();
-            foreach (var item in commandParameters.Parameters)
-            {
-                var parameter = item.Value;
-                dynamicParameters.Add(parameter.Name, parameter.Value
-                                    , parameter.DbType, parameter.ParameterDirection
-                                    , parameter.Size, parameter.Precision
-                                    , parameter.Scale);
-            }
-            return dynamicParameters;
-        }
-
-        /// <summary>
-        /// Get transaction isolation level
-        /// </summary>
-        /// <param name="dataIsolationLevel">Data isolation level</param>
-        /// <returns>Return isolation level</returns>
-        IsolationLevel? GetTransactionIsolationLevel(DataIsolationLevel? dataIsolationLevel)
-        {
-            if (!dataIsolationLevel.HasValue)
-            {
-                dataIsolationLevel = DataManager.GetDataIsolationLevel(DatabaseServerType.SQLServer);
-            }
-            return DataManager.GetSystemIsolationLevel(dataIsolationLevel);
-        }
-
-        /// <summary>
-        /// Get query transaction
-        /// </summary>
-        /// <param name="connection">Connection</param>
-        /// <param name="query">Query</param>
-        /// <returns>Return database transaction</returns>
-        IDbTransaction GetQueryTransaction(IDbConnection connection, IQuery query)
-        {
-            DataIsolationLevel? dataIsolationLevel = query?.IsolationLevel;
-            if (!dataIsolationLevel.HasValue)
-            {
-                dataIsolationLevel = DataManager.GetDataIsolationLevel(DatabaseServerType.SQLServer);
-            }
-            var systemIsolationLevel = GetTransactionIsolationLevel(dataIsolationLevel);
-            if (systemIsolationLevel.HasValue)
-            {
-                if (connection.State != ConnectionState.Open)
-                {
-                    connection.Open();
-                }
-                return connection.BeginTransaction(systemIsolationLevel.Value);
-            }
-            return null;
-        }
-
-        /// <summary>
-        /// Get execute transaction
-        /// </summary>
-        /// <param name="connection">Connection</param>
-        /// <param name="executeOption">Execute option</param>
-        /// <returns>Return database transaction</returns>
-        IDbTransaction GetExecuteTransaction(IDbConnection connection, CommandExecuteOption executeOption)
-        {
-            DataIsolationLevel? dataIsolationLevel = executeOption?.IsolationLevel;
-            if (!dataIsolationLevel.HasValue)
-            {
-                dataIsolationLevel = DataManager.GetDataIsolationLevel(DatabaseServerType.SQLServer);
-            }
-            var systemIsolationLevel = DataManager.GetSystemIsolationLevel(dataIsolationLevel);
-            if (connection.State != ConnectionState.Open)
-            {
-                connection.Open();
-            }
-            return systemIsolationLevel.HasValue ? connection.BeginTransaction(systemIsolationLevel.Value) : connection.BeginTransaction();
         }
 
         #endregion
