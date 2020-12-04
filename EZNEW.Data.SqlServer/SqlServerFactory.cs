@@ -12,6 +12,7 @@ using EZNEW.Develop.CQuery.CriteriaConverter;
 using EZNEW.Develop.CQuery.Translator;
 using EZNEW.Develop.DataAccess;
 using EZNEW.Develop.Entity;
+using EZNEW.Diagnostics;
 using EZNEW.Fault;
 using EZNEW.Logging;
 using EZNEW.Serialize;
@@ -32,6 +33,16 @@ namespace EZNEW.Data.SqlServer
         /// Parameter prefix
         /// </summary>
         internal const string ParameterPrefix = "@";
+
+        /// <summary>
+        /// Key word prefix
+        /// </summary>
+        internal const string KeywordPrefix = "[";
+
+        /// <summary>
+        /// Key word suffix
+        /// </summary>
+        internal const string KeywordSuffix = "]";
 
         /// <summary>
         /// Calculate operators
@@ -59,7 +70,7 @@ namespace EZNEW.Data.SqlServer
         /// <summary>
         /// Enable trace log
         /// </summary>
-        static readonly bool EnableTraceLog = false;
+        static bool EnableTraceLog = false;
 
         /// <summary>
         /// Trace log split
@@ -68,7 +79,10 @@ namespace EZNEW.Data.SqlServer
 
         static SqlServerFactory()
         {
-            EnableTraceLog = TraceLogSwitchManager.ShouldTraceFramework();
+            EnableTraceLog = SwitchManager.ShouldTraceFramework(sw =>
+            {
+                EnableTraceLog = SwitchManager.ShouldTraceFramework();
+            });
         }
 
         #region Get database connection
@@ -111,7 +125,7 @@ namespace EZNEW.Data.SqlServer
         internal static string ParseCriteriaConverter(ICriteriaConverter converter, string objectName, string fieldName)
         {
             var criteriaConverterParse = DataManager.GetCriteriaConverterParser(converter?.Name) ?? Parse;
-            return criteriaConverterParse(new CriteriaConverterParseOption()
+            return criteriaConverterParse(new CriteriaConverterParseOptions()
             {
                 CriteriaConverter = converter,
                 ServerType = DatabaseServerType.SQLServer,
@@ -125,7 +139,7 @@ namespace EZNEW.Data.SqlServer
         /// </summary>
         /// <param name="converterParseOption">Converter parse option</param>
         /// <returns></returns>
-        static string Parse(CriteriaConverterParseOption converterParseOption)
+        static string Parse(CriteriaConverterParseOptions converterParseOption)
         {
             if (string.IsNullOrWhiteSpace(converterParseOption?.CriteriaConverter?.Name))
             {
@@ -135,7 +149,7 @@ namespace EZNEW.Data.SqlServer
             switch (converterParseOption.CriteriaConverter.Name)
             {
                 case CriteriaConverterNames.StringLength:
-                    format = $"LEN({converterParseOption.ObjectName}.[{converterParseOption.FieldName}])";
+                    format = $"LEN({converterParseOption.ObjectName}.{WrapKeyword(converterParseOption.FieldName)})";
                     break;
             }
             if (string.IsNullOrWhiteSpace(format))
@@ -267,7 +281,7 @@ namespace EZNEW.Data.SqlServer
             foreach (var field in fields)
             {
                 //fields
-                formatFields.Add($"[{field.FieldName}]");
+                formatFields.Add($"{WrapKeyword(field.FieldName)}");
 
                 //parameter name
                 parameterSequence++;
@@ -330,16 +344,30 @@ namespace EZNEW.Data.SqlServer
             {
                 return string.Empty;
             }
-            string formatValue = $"{databaseObjectName}.[{field.FieldName}]";
+            string formatValue = $"{databaseObjectName}.{WrapKeyword(field.FieldName)}";
             if (!string.IsNullOrWhiteSpace(field.QueryFormat))
             {
-                formatValue = string.Format(field.QueryFormat + " AS [{1}]", formatValue, field.PropertyName);
+                formatValue = string.Format(field.QueryFormat + " AS {1}", formatValue, WrapKeyword(field.PropertyName));
             }
             else if (field.FieldName != field.PropertyName && convertField)
             {
-                formatValue = $"{formatValue} AS [{field.PropertyName}]";
+                formatValue = $"{formatValue} AS {WrapKeyword(field.PropertyName)}";
             }
             return formatValue;
+        }
+
+        #endregion
+
+        #region Wrap keyword
+
+        /// <summary>
+        /// Wrap keyword by the KeywordPrefix and the KeywordSuffix
+        /// </summary>
+        /// <param name="originalValue">Original value</param>
+        /// <returns></returns>
+        internal static string WrapKeyword(string originalValue)
+        {
+            return $"{KeywordPrefix}{originalValue}{KeywordSuffix}";
         }
 
         #endregion
@@ -530,7 +558,7 @@ namespace EZNEW.Data.SqlServer
         /// <param name="connection">Connection</param>
         /// <param name="executeOption">Execute option</param>
         /// <returns>Return database transaction</returns>
-        public static IDbTransaction GetExecuteTransaction(IDbConnection connection, CommandExecuteOption executeOption)
+        public static IDbTransaction GetExecuteTransaction(IDbConnection connection, CommandExecuteOptions executeOption)
         {
             DataIsolationLevel? dataIsolationLevel = executeOption?.IsolationLevel;
             if (!dataIsolationLevel.HasValue)

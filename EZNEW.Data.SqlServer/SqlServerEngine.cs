@@ -30,7 +30,7 @@ namespace EZNEW.Data.SqlServer
         /// <param name="executeOption">Execute option</param>
         /// <param name="commands">Commands</param>
         /// <returns>Return effect data numbers</returns>
-        public int Execute(DatabaseServer server, CommandExecuteOption executeOption, IEnumerable<ICommand> commands)
+        public int Execute(DatabaseServer server, CommandExecuteOptions executeOption, IEnumerable<ICommand> commands)
         {
             return ExecuteAsync(server, executeOption, commands).Result;
         }
@@ -42,7 +42,7 @@ namespace EZNEW.Data.SqlServer
         /// <param name="executeOption">Execute option</param>
         /// <param name="commands">Commands</param>
         /// <returns>Return effect data numbers</returns>
-        public int Execute(DatabaseServer server, CommandExecuteOption executeOption, params ICommand[] commands)
+        public int Execute(DatabaseServer server, CommandExecuteOptions executeOption, params ICommand[] commands)
         {
             return ExecuteAsync(server, executeOption, commands).Result;
         }
@@ -54,7 +54,7 @@ namespace EZNEW.Data.SqlServer
         /// <param name="executeOption">Execute option</param>
         /// <param name="commands">Commands</param>
         /// <returns>Return effect data numbers</returns>
-        public async Task<int> ExecuteAsync(DatabaseServer server, CommandExecuteOption executeOption, IEnumerable<ICommand> commands)
+        public async Task<int> ExecuteAsync(DatabaseServer server, CommandExecuteOptions executeOption, IEnumerable<ICommand> commands)
         {
             #region group execute commands
 
@@ -135,7 +135,7 @@ namespace EZNEW.Data.SqlServer
         /// <param name="executeOption">Execute option</param>
         /// <param name="commands">Commands</param>
         /// <returns>Return effect data numbers</returns>
-        public async Task<int> ExecuteAsync(DatabaseServer server, CommandExecuteOption executeOption, params ICommand[] commands)
+        public async Task<int> ExecuteAsync(DatabaseServer server, CommandExecuteOptions executeOption, params ICommand[] commands)
         {
             IEnumerable<ICommand> cmdCollection = commands;
             return await ExecuteAsync(server, executeOption, cmdCollection).ConfigureAwait(false);
@@ -148,7 +148,7 @@ namespace EZNEW.Data.SqlServer
         /// <param name="executeCommands">execute commands</param>
         /// <param name="useTransaction">use transaction</param>
         /// <returns>Return effect data numbers</returns>
-        async Task<int> ExecuteCommandAsync(DatabaseServer server, CommandExecuteOption executeOption, IEnumerable<DatabaseExecuteCommand> executeCommands, bool useTransaction)
+        async Task<int> ExecuteCommandAsync(DatabaseServer server, CommandExecuteOptions executeOption, IEnumerable<DatabaseExecuteCommand> executeCommands, bool useTransaction)
         {
             int resultValue = 0;
             bool success = true;
@@ -253,7 +253,7 @@ namespace EZNEW.Data.SqlServer
             {
                 return null;
             }
-            string cmdText = $"INSERT INTO [{objectName}] ({string.Join(",", insertFormatResult.Item1)}) VALUES ({string.Join(",", insertFormatResult.Item2)});";
+            string cmdText = $"INSERT INTO {SqlServerFactory.WrapKeyword(objectName)} ({string.Join(",", insertFormatResult.Item1)}) VALUES ({string.Join(",", insertFormatResult.Item2)});";
             CommandParameters parameters = insertFormatResult.Item3;
             translator.ParameterSequence += fieldCount;
             return new DatabaseExecuteCommand()
@@ -311,7 +311,7 @@ namespace EZNEW.Data.SqlServer
                         {
                             var calculateModifyValue = parameterValue as CalculateModifyValue;
                             string calChar = SqlServerFactory.GetCalculateChar(calculateModifyValue.Operator);
-                            newValueExpression = $"{translator.ObjectPetName}.[{field.FieldName}]{calChar}{SqlServerFactory.ParameterPrefix}{parameterName}";
+                            newValueExpression = $"{translator.ObjectPetName}.{SqlServerFactory.WrapKeyword(field.FieldName)}{calChar}{SqlServerFactory.ParameterPrefix}{parameterName}";
                         }
                     }
                 }
@@ -319,9 +319,9 @@ namespace EZNEW.Data.SqlServer
                 {
                     newValueExpression = $"{SqlServerFactory.ParameterPrefix}{parameterName}";
                 }
-                updateSetArray.Add($"{translator.ObjectPetName}.[{field.FieldName}]={newValueExpression}");
+                updateSetArray.Add($"{translator.ObjectPetName}.{SqlServerFactory.WrapKeyword(field.FieldName)}={newValueExpression}");
             }
-            string cmdText = $"{preScript}UPDATE {translator.ObjectPetName} SET {string.Join(",", updateSetArray)} FROM [{objectName}] AS {translator.ObjectPetName} {joinScript} {conditionString};";
+            string cmdText = $"{preScript}UPDATE {translator.ObjectPetName} SET {string.Join(",", updateSetArray)} FROM {SqlServerFactory.WrapKeyword(objectName)} AS {translator.ObjectPetName} {joinScript} {conditionString};";
             translator.ParameterSequence = parameterSequence;
 
             #endregion
@@ -367,7 +367,7 @@ namespace EZNEW.Data.SqlServer
             #region script
 
             string objectName = DataManager.GetEntityObjectName(DatabaseServerType.SQLServer, command.EntityType, command.ObjectName);
-            string cmdText = $"{preScript}DELETE {translator.ObjectPetName} FROM [{objectName}] AS {translator.ObjectPetName}{joinScript} {conditionString};";
+            string cmdText = $"{preScript}DELETE {translator.ObjectPetName} FROM {SqlServerFactory.WrapKeyword(objectName)} AS {translator.ObjectPetName}{joinScript} {conditionString};";
 
             #endregion
 
@@ -445,12 +445,12 @@ namespace EZNEW.Data.SqlServer
                     string outputFormatedField = string.Join(",", SqlServerFactory.FormatQueryFields(translator.ObjectPetName, queryFields, true));
                     if (string.IsNullOrWhiteSpace(tranResult.CombineScript))
                     {
-                        cmdText = $"{preScript}SELECT {(size > 0 ? $"TOP {size}" : string.Empty)} {outputFormatedField} FROM [{objectName}] AS {translator.ObjectPetName} {joinScript} {(string.IsNullOrWhiteSpace(tranResult.ConditionString) ? string.Empty : $"WHERE {tranResult.ConditionString}")} {orderString}";
+                        cmdText = $"{preScript}SELECT {(size > 0 ? $"TOP {size}" : string.Empty)} {outputFormatedField} FROM {SqlServerFactory.WrapKeyword(objectName)} AS {translator.ObjectPetName} {joinScript} {(string.IsNullOrWhiteSpace(tranResult.ConditionString) ? string.Empty : $"WHERE {tranResult.ConditionString}")} {orderString}";
                     }
                     else
                     {
                         string innerFormatedField = string.Join(",", SqlServerFactory.FormatQueryFields(translator.ObjectPetName, queryFields, false));
-                        cmdText = $"{preScript}SELECT {(size > 0 ? $"TOP {size}" : string.Empty)} {outputFormatedField} FROM (SELECT {innerFormatedField} FROM [{objectName}] AS {translator.ObjectPetName} {joinScript} {(string.IsNullOrWhiteSpace(tranResult.ConditionString) ? string.Empty : $"WHERE {tranResult.ConditionString}")} {tranResult.CombineScript}) AS {translator.ObjectPetName} {orderString}";
+                        cmdText = $"{preScript}SELECT {(size > 0 ? $"TOP {size}" : string.Empty)} {outputFormatedField} FROM (SELECT {innerFormatedField} FROM {SqlServerFactory.WrapKeyword(objectName)} AS {translator.ObjectPetName} {joinScript} {(string.IsNullOrWhiteSpace(tranResult.ConditionString) ? string.Empty : $"WHERE {tranResult.ConditionString}")} {tranResult.CombineScript}) AS {translator.ObjectPetName} {orderString}";
                     }
                     break;
             }
@@ -561,12 +561,12 @@ namespace EZNEW.Data.SqlServer
                     var outputFormatedField = string.Join(",", SqlServerFactory.FormatQueryFields(translator.ObjectPetName, queryFields, true));
                     if (string.IsNullOrWhiteSpace(tranResult.CombineScript))
                     {
-                        cmdText = $"{tranResult.PreScript}SELECT COUNT({translator.ObjectPetName}.[{defaultFieldName}]) OVER() AS QueryDataTotalCount,{outputFormatedField} FROM [{objectName}] AS {translator.ObjectPetName} {joinScript} {(string.IsNullOrWhiteSpace(tranResult.ConditionString) ? string.Empty : $"WHERE {tranResult.ConditionString}")} ORDER BY {(string.IsNullOrWhiteSpace(tranResult.OrderString) ? $"{translator.ObjectPetName}.[{defaultFieldName}] DESC" : tranResult.OrderString)} OFFSET {offsetNum} ROWS FETCH NEXT {size} ROWS ONLY";
+                        cmdText = $"{tranResult.PreScript}SELECT COUNT({translator.ObjectPetName}.{SqlServerFactory.WrapKeyword(defaultFieldName)}) OVER() AS QueryDataTotalCount,{outputFormatedField} FROM {SqlServerFactory.WrapKeyword(objectName)} AS {translator.ObjectPetName} {joinScript} {(string.IsNullOrWhiteSpace(tranResult.ConditionString) ? string.Empty : $"WHERE {tranResult.ConditionString}")} ORDER BY {(string.IsNullOrWhiteSpace(tranResult.OrderString) ? $"{translator.ObjectPetName}.{SqlServerFactory.WrapKeyword(defaultFieldName)} DESC" : tranResult.OrderString)} OFFSET {offsetNum} ROWS FETCH NEXT {size} ROWS ONLY";
                     }
                     else
                     {
                         var innerFormatedField = string.Join(",", SqlServerFactory.FormatQueryFields(translator.ObjectPetName, queryFields, false));
-                        cmdText = $"{tranResult.PreScript}SELECT COUNT({translator.ObjectPetName}.[{defaultFieldName}]) OVER() AS QueryDataTotalCount,{outputFormatedField} FROM (SELECT {innerFormatedField} FROM [{objectName}] AS {translator.ObjectPetName} {joinScript} {(string.IsNullOrWhiteSpace(tranResult.ConditionString) ? string.Empty : $"WHERE {tranResult.ConditionString}")} {tranResult.CombineScript}) AS {translator.ObjectPetName} ORDER BY {(string.IsNullOrWhiteSpace(tranResult.OrderString) ? $"{translator.ObjectPetName}.[{defaultFieldName}] DESC" : tranResult.OrderString)} OFFSET {offsetNum} ROWS FETCH NEXT {size} ROWS ONLY";
+                        cmdText = $"{tranResult.PreScript}SELECT COUNT({translator.ObjectPetName}.{SqlServerFactory.WrapKeyword(defaultFieldName)}) OVER() AS QueryDataTotalCount,{outputFormatedField} FROM (SELECT {innerFormatedField} FROM {SqlServerFactory.WrapKeyword(objectName)} AS {translator.ObjectPetName} {joinScript} {(string.IsNullOrWhiteSpace(tranResult.ConditionString) ? string.Empty : $"WHERE {tranResult.ConditionString}")} {tranResult.CombineScript}) AS {translator.ObjectPetName} ORDER BY {(string.IsNullOrWhiteSpace(tranResult.OrderString) ? $"{translator.ObjectPetName}.{SqlServerFactory.WrapKeyword(defaultFieldName)} DESC" : tranResult.OrderString)} OFFSET {offsetNum} ROWS FETCH NEXT {size} ROWS ONLY";
                     }
                     break;
             }
@@ -631,7 +631,7 @@ namespace EZNEW.Data.SqlServer
 
             string objectName = DataManager.GetEntityObjectName(DatabaseServerType.SQLServer, command.EntityType, command.ObjectName);
             string formatedField = string.Join(",", SqlServerFactory.FormatQueryFields(translator.ObjectPetName, command.Query, command.EntityType, true, false));
-            string cmdText = $"{preScript}SELECT 1 WHERE EXISTS(SELECT {formatedField} FROM [{objectName}] AS {translator.ObjectPetName} {joinScript} {conditionString} {tranResult.CombineScript})";
+            string cmdText = $"{preScript}SELECT 1 WHERE EXISTS(SELECT {formatedField} FROM {SqlServerFactory.WrapKeyword(objectName)} AS {translator.ObjectPetName} {joinScript} {conditionString} {tranResult.CombineScript})";
 
             #endregion
 
@@ -746,8 +746,8 @@ namespace EZNEW.Data.SqlServer
                     string objectName = DataManager.GetEntityObjectName(DatabaseServerType.SQLServer, command.EntityType, command.ObjectName);
                     string formatedDefaultField = SqlServerFactory.FormatField(translator.ObjectPetName, defaultField, false);
                     cmdText = string.IsNullOrWhiteSpace(tranResult.CombineScript)
-                        ? $"{tranResult.PreScript}SELECT {funcName}({formatedDefaultField}) FROM [{objectName}] AS {translator.ObjectPetName} {joinScript} {(string.IsNullOrWhiteSpace(tranResult.ConditionString) ? string.Empty : $"WHERE {tranResult.ConditionString}")}"
-                        : $"{tranResult.PreScript}SELECT {funcName}({formatedDefaultField}) FROM (SELECT {string.Join(",", SqlServerFactory.FormatQueryFields(translator.ObjectPetName, command.Query, command.EntityType, true, false))} FROM [{objectName}] AS {translator.ObjectPetName} {joinScript} {(string.IsNullOrWhiteSpace(tranResult.ConditionString) ? string.Empty : $"WHERE {tranResult.ConditionString}")} {tranResult.CombineScript}) AS {translator.ObjectPetName}";
+                        ? $"{tranResult.PreScript}SELECT {funcName}({formatedDefaultField}) FROM {SqlServerFactory.WrapKeyword(objectName)} AS {translator.ObjectPetName} {joinScript} {(string.IsNullOrWhiteSpace(tranResult.ConditionString) ? string.Empty : $"WHERE {tranResult.ConditionString}")}"
+                        : $"{tranResult.PreScript}SELECT {funcName}({formatedDefaultField}) FROM (SELECT {string.Join(",", SqlServerFactory.FormatQueryFields(translator.ObjectPetName, command.Query, command.EntityType, true, false))} FROM {SqlServerFactory.WrapKeyword(objectName)} AS {translator.ObjectPetName} {joinScript} {(string.IsNullOrWhiteSpace(tranResult.ConditionString) ? string.Empty : $"WHERE {tranResult.ConditionString}")} {tranResult.CombineScript}) AS {translator.ObjectPetName}";
                     break;
             }
 
