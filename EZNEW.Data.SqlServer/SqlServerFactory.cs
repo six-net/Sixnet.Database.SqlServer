@@ -195,7 +195,7 @@ namespace EZNEW.Data.SqlServer
         /// <param name="parameters">Parameters</param>
         static void LogScriptCore(string script, string parameters)
         {
-            LogManager.LogInformation<SqlServerEngine>(TraceLogSplit +
+            LogManager.LogInformation<SqlServerProvider>(TraceLogSplit +
             $"{Environment.NewLine}{Environment.NewLine}{script}" +
             $"{Environment.NewLine}{Environment.NewLine}{parameters}" +
             $"{Environment.NewLine}{Environment.NewLine}");

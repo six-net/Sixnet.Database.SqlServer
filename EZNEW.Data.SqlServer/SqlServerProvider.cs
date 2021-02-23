@@ -10,38 +10,38 @@ using EZNEW.Develop.CQuery.Translator;
 using EZNEW.Develop.Command;
 using EZNEW.Develop.Command.Modify;
 using EZNEW.Fault;
-using EZNEW.Develop.DataAccess;
 using EZNEW.Data.Configuration;
 using EZNEW.Dapper;
+using System.Data.SqlClient;
 
 namespace EZNEW.Data.SqlServer
 {
     /// <summary>
-    /// Imeplements database engine for sqlserver
+    /// Imeplements database provider for sqlserver
     /// </summary>
-    public class SqlServerEngine : IDatabaseEngine
+    public class SqlServerProvider : IDatabaseProvider
     {
         #region Execute
 
         /// <summary>
         /// Execute command
         /// </summary>
-        /// <param name="server">Server</param>
-        /// <param name="executeOption">Execute option</param>
+        /// <param name="server">Database server</param>
+        /// <param name="executeOptions">Execute options</param>
         /// <param name="commands">Commands</param>
-        /// <returns>Return effect data numbers</returns>
-        public int Execute(DatabaseServer server, CommandExecuteOptions executeOption, IEnumerable<ICommand> commands)
+        /// <returns>Return the affected data numbers</returns>
+        public int Execute(DatabaseServer server, CommandExecuteOptions executeOptions, IEnumerable<ICommand> commands)
         {
-            return ExecuteAsync(server, executeOption, commands).Result;
+            return ExecuteAsync(server, executeOptions, commands).Result;
         }
 
         /// <summary>
         /// Execute command
         /// </summary>
-        /// <param name="server">Server</param>
-        /// <param name="executeOption">Execute option</param>
+        /// <param name="server">Database server</param>
+        /// <param name="executeOption">Execute options</param>
         /// <param name="commands">Commands</param>
-        /// <returns>Return effect data numbers</returns>
+        /// <returns>Return the affected data numbers</returns>
         public int Execute(DatabaseServer server, CommandExecuteOptions executeOption, params ICommand[] commands)
         {
             return ExecuteAsync(server, executeOption, commands).Result;
@@ -50,10 +50,10 @@ namespace EZNEW.Data.SqlServer
         /// <summary>
         /// Execute command
         /// </summary>
-        /// <param name="server">Server</param>
-        /// <param name="executeOption">Execute option</param>
+        /// <param name="server">Database server</param>
+        /// <param name="executeOption">Execute options</param>
         /// <param name="commands">Commands</param>
-        /// <returns>Return effect data numbers</returns>
+        /// <returns>Return the affected data numbers</returns>
         public async Task<int> ExecuteAsync(DatabaseServer server, CommandExecuteOptions executeOption, IEnumerable<ICommand> commands)
         {
             #region group execute commands
@@ -131,10 +131,10 @@ namespace EZNEW.Data.SqlServer
         /// <summary>
         /// Execute command
         /// </summary>
-        /// <param name="server">Server</param>
-        /// <param name="executeOption">Execute option</param>
+        /// <param name="server">Database server</param>
+        /// <param name="executeOption">Execute options</param>
         /// <param name="commands">Commands</param>
-        /// <returns>Return effect data numbers</returns>
+        /// <returns>Return the affected data numbers</returns>
         public async Task<int> ExecuteAsync(DatabaseServer server, CommandExecuteOptions executeOption, params ICommand[] commands)
         {
             IEnumerable<ICommand> cmdCollection = commands;
@@ -147,7 +147,7 @@ namespace EZNEW.Data.SqlServer
         /// <param name="server">db server</param>
         /// <param name="executeCommands">execute commands</param>
         /// <param name="useTransaction">use transaction</param>
-        /// <returns>Return effect data numbers</returns>
+        /// <returns>Return the affected data numbers</returns>
         async Task<int> ExecuteCommandAsync(DatabaseServer server, CommandExecuteOptions executeOption, IEnumerable<DatabaseExecuteCommand> executeCommands, bool useTransaction)
         {
             int resultValue = 0;
@@ -200,7 +200,7 @@ namespace EZNEW.Data.SqlServer
         /// Get database execute command
         /// </summary>
         /// <param name="command">Command</param>
-        /// <returns>Return database execute command</returns>
+        /// <returns>Return a database execute command</returns>
         DatabaseExecuteCommand GetExecuteDbCommand(IQueryTranslator queryTranslator, RdbCommand command)
         {
             DatabaseExecuteCommand GetTextCommand()
@@ -242,7 +242,7 @@ namespace EZNEW.Data.SqlServer
         /// </summary>
         /// <param name="translator">Translator</param>
         /// <param name="command">Command</param>
-        /// <returns>Return insert execute command</returns>
+        /// <returns>Return an insert execute command</returns>
         DatabaseExecuteCommand GetInsertExecuteDbCommand(IQueryTranslator translator, RdbCommand command)
         {
             string objectName = DataManager.GetEntityObjectName(DatabaseServerType.SQLServer, command.EntityType, command.ObjectName);
@@ -270,7 +270,7 @@ namespace EZNEW.Data.SqlServer
         /// </summary>
         /// <param name="translator">Translator</param>
         /// <param name="command">Command</param>
-        /// <returns>Return update execute command</returns>
+        /// <returns>Return an update execute command</returns>
         DatabaseExecuteCommand GetUpdateExecuteDbCommand(IQueryTranslator translator, RdbCommand command)
         {
             #region query translate
@@ -348,7 +348,7 @@ namespace EZNEW.Data.SqlServer
         /// </summary>
         /// <param name="translator">Translator</param>
         /// <param name="command">Command</param>
-        /// <returns>Return delete execute command</returns>
+        /// <returns>Return a delete execute command</returns>
         DatabaseExecuteCommand GetDeleteExecuteDbCommand(IQueryTranslator translator, RdbCommand command)
         {
             #region query translate
@@ -399,7 +399,7 @@ namespace EZNEW.Data.SqlServer
         /// <typeparam name="T">Data type</typeparam>
         /// <param name="server">Database server</param>
         /// <param name="command">Command</param>
-        /// <returns>Return datas</returns>
+        /// <returns>Return the datas</returns>
         public IEnumerable<T> Query<T>(DatabaseServer server, ICommand command)
         {
             return QueryAsync<T>(server, command).Result;
@@ -411,7 +411,7 @@ namespace EZNEW.Data.SqlServer
         /// <typeparam name="T">Data type</typeparam>
         /// <param name="server">Database server</param>
         /// <param name="command">Command</param>
-        /// <returns>Return datas</returns>
+        /// <returns>Return the datas</returns>
         public async Task<IEnumerable<T>> QueryAsync<T>(DatabaseServer server, ICommand command)
         {
             if (command.Query == null)
@@ -515,7 +515,7 @@ namespace EZNEW.Data.SqlServer
         /// <param name="command">Command</param>
         /// <param name="offsetNum">Offset num</param>
         /// <param name="size">Query size</param>
-        /// <returns>Return datas</returns>
+        /// <returns>Return the datas</returns>
         public IEnumerable<T> QueryOffset<T>(DatabaseServer server, ICommand command, int offsetNum = 0, int size = int.MaxValue)
         {
             return QueryOffsetAsync<T>(server, command, offsetNum, size).Result;
@@ -529,7 +529,7 @@ namespace EZNEW.Data.SqlServer
         /// <param name="command">Command</param>
         /// <param name="offsetNum">Offset num</param>
         /// <param name="size">Query size</param>
-        /// <returns>Return datas</returns>
+        /// <returns>Return the datas</returns>
         public async Task<IEnumerable<T>> QueryOffsetAsync<T>(DatabaseServer server, ICommand command, int offsetNum = 0, int size = int.MaxValue)
         {
             if (command.Query == null)
@@ -591,22 +591,22 @@ namespace EZNEW.Data.SqlServer
         }
 
         /// <summary>
-        /// Determine whether data has existed
+        /// Query whether the data exists or not
         /// </summary>
-        /// <param name="server">Server</param>
+        /// <param name="server">Database server</param>
         /// <param name="command">Command</param>
-        /// <returns>Return data has existed</returns>
+        /// <returns>Return whether the data exists or not</returns>
         public bool Query(DatabaseServer server, ICommand command)
         {
             return QueryAsync(server, command).Result;
         }
 
         /// <summary>
-        /// Determine whether data has existed
+        /// Query whether the data exists or not
         /// </summary>
-        /// <param name="server">Server</param>
+        /// <param name="server">Database server</param>
         /// <param name="command">Command</param>
-        /// <returns>Return data has existed</returns>
+        /// <returns>Return whether the data exists or not</returns>
         public async Task<bool> QueryAsync(DatabaseServer server, ICommand command)
         {
             var translator = SqlServerFactory.GetQueryTranslator(server);
@@ -659,7 +659,7 @@ namespace EZNEW.Data.SqlServer
         /// <typeparam name="T">Data type</typeparam>
         /// <param name="server">Database server</param>
         /// <param name="command">Command</param>
-        /// <returns>Return data</returns>
+        /// <returns>Return the data</returns>
         public T AggregateValue<T>(DatabaseServer server, ICommand command)
         {
             return AggregateValueAsync<T>(server, command).Result;
@@ -671,7 +671,7 @@ namespace EZNEW.Data.SqlServer
         /// <typeparam name="T">Data type</typeparam>
         /// <param name="server">Database server</param>
         /// <param name="command">Command</param>
-        /// <returns>Return data</returns>
+        /// <returns>Return the data</returns>
         public async Task<T> AggregateValueAsync<T>(DatabaseServer server, ICommand command)
         {
             if (command.Query == null)
@@ -775,7 +775,7 @@ namespace EZNEW.Data.SqlServer
         /// </summary>
         /// <param name="server">Database server</param>
         /// <param name="command">Command</param>
-        /// <returns>Return data set</returns>
+        /// <returns>Return the dataset</returns>
         public async Task<DataSet> QueryMultipleAsync(DatabaseServer server, ICommand command)
         {
             //Trace log
@@ -796,6 +796,109 @@ namespace EZNEW.Data.SqlServer
                     }
                     return dataSet;
                 }
+            }
+        }
+
+        #endregion
+
+        #region Bulk
+
+        /// <summary>
+        /// Bulk insert datas
+        /// </summary>
+        /// <param name="server">Database server</param>
+        /// <param name="dataTable">Data table</param>
+        /// <param name="bulkInsertOptions">Insert options</param>
+        public void BulkInsert(DatabaseServer server, DataTable dataTable, IBulkInsertOptions bulkInsertOptions = null)
+        {
+            BulkInsertAsync(server, dataTable).Wait();
+        }
+
+        /// <summary>
+        /// Bulk insert datas
+        /// </summary>
+        /// <param name="server">Database server</param>
+        /// <param name="dataTable">Data table</param>
+        /// <param name="bulkInsertOptions">Insert options</param>
+        public async Task BulkInsertAsync(DatabaseServer server, DataTable dataTable, IBulkInsertOptions bulkInsertOptions = null)
+        {
+            if (server == null)
+            {
+                throw new ArgumentNullException(nameof(server));
+            }
+            if (dataTable == null)
+            {
+                throw new ArgumentNullException(nameof(dataTable));
+            }
+            using (SqlConnection sqlConnection = new SqlConnection(server?.ConnectionString))
+            {
+                try
+                {
+                    sqlConnection.Open();
+                    SqlTransaction sqlTransaction = null;
+                    SqlBulkCopy sqlServerBulkCopy = null;
+                    if (bulkInsertOptions is SqlServerBulkInsertOptions sqlServerBulkInsertOptions && sqlServerBulkInsertOptions != null)
+                    {
+                        if (sqlServerBulkInsertOptions.UseTransaction)
+                        {
+                            sqlTransaction = sqlConnection.BeginTransaction();
+                            sqlServerBulkCopy = new SqlBulkCopy(sqlConnection, SqlBulkCopyOptions.Default, sqlTransaction);
+                        }
+                        else
+                        {
+                            sqlServerBulkCopy = new SqlBulkCopy(sqlConnection);
+                        }
+                        if (!sqlServerBulkInsertOptions.ColumnMappings.IsNullOrEmpty())
+                        {
+                            sqlServerBulkInsertOptions.ColumnMappings.ForEach(c =>
+                            {
+                                sqlServerBulkCopy.ColumnMappings.Add(c);
+                            });
+                        }
+                        if (sqlServerBulkInsertOptions.BulkCopyTimeout > 0)
+                        {
+                            sqlServerBulkCopy.BulkCopyTimeout = sqlServerBulkInsertOptions.BulkCopyTimeout;
+                        }
+                        if (sqlServerBulkInsertOptions.BatchSize > 0)
+                        {
+                            sqlServerBulkCopy.BatchSize = sqlServerBulkInsertOptions.BatchSize;
+                        }
+                    }
+                    else
+                    {
+                        sqlServerBulkCopy = new SqlBulkCopy(sqlConnection);
+                    }
+                    if (sqlServerBulkCopy.ColumnMappings.Count < 1)
+                    {
+                        BuildColumnMapping(sqlServerBulkCopy, dataTable);
+                    }
+                    sqlServerBulkCopy.DestinationTableName = dataTable.TableName;
+                    await sqlServerBulkCopy.WriteToServerAsync(dataTable).ConfigureAwait(false);
+                    sqlServerBulkCopy.Close();
+                }
+                catch (Exception)
+                {
+                    throw;
+                }
+                finally
+                {
+                    if (sqlConnection != null && sqlConnection.State != ConnectionState.Closed)
+                    {
+                        sqlConnection.Close();
+                    }
+                }
+            }
+        }
+
+        static void BuildColumnMapping(SqlBulkCopy sqlBulkCopy, DataTable dataTable)
+        {
+            foreach (DataColumn column in dataTable.Columns)
+            {
+                sqlBulkCopy.ColumnMappings.Add(new SqlBulkCopyColumnMapping()
+                {
+                    SourceColumn = column.ColumnName,
+                    DestinationColumn = column.ColumnName
+                });
             }
         }
 
