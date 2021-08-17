@@ -4,12 +4,12 @@ using System.Data;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using EZNEW.Develop.Entity;
-using EZNEW.Develop.CQuery;
-using EZNEW.Develop.CQuery.Translator;
-using EZNEW.Develop.Command;
-using EZNEW.Develop.Command.Modify;
-using EZNEW.Fault;
+using EZNEW.Development.Entity;
+using EZNEW.Development.Query;
+using EZNEW.Development.Query.Translator;
+using EZNEW.Development.Command;
+using EZNEW.Development.Command.Modification;
+using EZNEW.Exceptions;
 using EZNEW.Data.Configuration;
 using EZNEW.Dapper;
 using System.Data.SqlClient;
@@ -30,7 +30,7 @@ namespace EZNEW.Data.SqlServer
         /// <param name="executeOptions">Execute options</param>
         /// <param name="commands">Commands</param>
         /// <returns>Return the affected data numbers</returns>
-        public int Execute(DatabaseServer server, CommandExecuteOptions executeOptions, IEnumerable<ICommand> commands)
+        public int Execute(DatabaseServer server, CommandExecutionOptions executeOptions, IEnumerable<ICommand> commands)
         {
             return ExecuteAsync(server, executeOptions, commands).Result;
         }
@@ -42,7 +42,7 @@ namespace EZNEW.Data.SqlServer
         /// <param name="executeOption">Execute options</param>
         /// <param name="commands">Commands</param>
         /// <returns>Return the affected data numbers</returns>
-        public int Execute(DatabaseServer server, CommandExecuteOptions executeOption, params ICommand[] commands)
+        public int Execute(DatabaseServer server, CommandExecutionOptions executeOption, params ICommand[] commands)
         {
             return ExecuteAsync(server, executeOption, commands).Result;
         }
@@ -54,12 +54,12 @@ namespace EZNEW.Data.SqlServer
         /// <param name="executeOption">Execute options</param>
         /// <param name="commands">Commands</param>
         /// <returns>Return the affected data numbers</returns>
-        public async Task<int> ExecuteAsync(DatabaseServer server, CommandExecuteOptions executeOption, IEnumerable<ICommand> commands)
+        public async Task<int> ExecuteAsync(DatabaseServer server, CommandExecutionOptions executeOption, IEnumerable<ICommand> commands)
         {
             #region group execute commands
 
             IQueryTranslator translator = SqlServerFactory.GetQueryTranslator(server);
-            List<DatabaseExecuteCommand> executeCommands = new List<DatabaseExecuteCommand>();
+            List<DatabaseExecutionCommand> executeCommands = new List<DatabaseExecutionCommand>();
             var batchExecuteConfig = DataManager.GetBatchExecuteConfiguration(server.ServerType) ?? BatchExecuteConfiguration.Default;
             var groupStatementsCount = batchExecuteConfig.GroupStatementsCount;
             groupStatementsCount = groupStatementsCount < 0 ? 1 : groupStatementsCount;
@@ -71,9 +71,9 @@ namespace EZNEW.Data.SqlServer
             bool forceReturnValue = false;
             int cmdCount = 0;
 
-            DatabaseExecuteCommand GetGroupExecuteCommand()
+            DatabaseExecutionCommand GetGroupExecuteCommand()
             {
-                var executeCommand = new DatabaseExecuteCommand()
+                var executeCommand = new DatabaseExecutionCommand()
                 {
                     CommandText = commandTextBuilder.ToString(),
                     CommandType = CommandType.Text,
@@ -90,14 +90,14 @@ namespace EZNEW.Data.SqlServer
 
             foreach (var cmd in commands)
             {
-                DatabaseExecuteCommand executeCommand = GetExecuteDbCommand(translator, cmd as RdbCommand);
+                DatabaseExecutionCommand executeCommand = GetExecuteDbCommand(translator, cmd as DefaultCommand);
                 if (executeCommand == null)
                 {
                     continue;
                 }
 
                 //Trace log
-                SqlServerFactory.LogExecuteCommand(executeCommand);
+                SqlServerFactory.LogExecutionCommand(executeCommand);
 
                 cmdCount++;
                 if (executeCommand.PerformAlone)
@@ -135,7 +135,7 @@ namespace EZNEW.Data.SqlServer
         /// <param name="executeOption">Execute options</param>
         /// <param name="commands">Commands</param>
         /// <returns>Return the affected data numbers</returns>
-        public async Task<int> ExecuteAsync(DatabaseServer server, CommandExecuteOptions executeOption, params ICommand[] commands)
+        public async Task<int> ExecuteAsync(DatabaseServer server, CommandExecutionOptions executeOption, params ICommand[] commands)
         {
             IEnumerable<ICommand> cmdCollection = commands;
             return await ExecuteAsync(server, executeOption, cmdCollection).ConfigureAwait(false);
@@ -148,7 +148,7 @@ namespace EZNEW.Data.SqlServer
         /// <param name="executeCommands">execute commands</param>
         /// <param name="useTransaction">use transaction</param>
         /// <returns>Return the affected data numbers</returns>
-        async Task<int> ExecuteCommandAsync(DatabaseServer server, CommandExecuteOptions executeOption, IEnumerable<DatabaseExecuteCommand> executeCommands, bool useTransaction)
+        async Task<int> ExecuteCommandAsync(DatabaseServer server, CommandExecutionOptions executeOption, IEnumerable<DatabaseExecutionCommand> executeCommands, bool useTransaction)
         {
             int resultValue = 0;
             bool success = true;
@@ -201,11 +201,11 @@ namespace EZNEW.Data.SqlServer
         /// </summary>
         /// <param name="command">Command</param>
         /// <returns>Return a database execute command</returns>
-        DatabaseExecuteCommand GetExecuteDbCommand(IQueryTranslator queryTranslator, RdbCommand command)
+        DatabaseExecutionCommand GetExecuteDbCommand(IQueryTranslator queryTranslator, DefaultCommand command)
         {
-            DatabaseExecuteCommand GetTextCommand()
+            DatabaseExecutionCommand GetTextCommand()
             {
-                return new DatabaseExecuteCommand()
+                return new DatabaseExecutionCommand()
                 {
                     CommandText = command.CommandText,
                     Parameters = SqlServerFactory.ParseParameters(command.Parameters),
@@ -214,20 +214,20 @@ namespace EZNEW.Data.SqlServer
                     HasPreScript = true
                 };
             }
-            if (command.ExecuteMode == CommandExecuteMode.CommandText)
+            if (command.ExecutionMode == CommandExecutionMode.CommandText)
             {
                 return GetTextCommand();
             }
-            DatabaseExecuteCommand executeCommand;
+            DatabaseExecutionCommand executeCommand;
             switch (command.OperateType)
             {
-                case OperateType.Insert:
+                case CommandOperationType.Insert:
                     executeCommand = GetInsertExecuteDbCommand(queryTranslator, command);
                     break;
-                case OperateType.Update:
+                case CommandOperationType.Update:
                     executeCommand = GetUpdateExecuteDbCommand(queryTranslator, command);
                     break;
-                case OperateType.Delete:
+                case CommandOperationType.Delete:
                     executeCommand = GetDeleteExecuteDbCommand(queryTranslator, command);
                     break;
                 default:
@@ -243,7 +243,7 @@ namespace EZNEW.Data.SqlServer
         /// <param name="translator">Translator</param>
         /// <param name="command">Command</param>
         /// <returns>Return an insert execute command</returns>
-        DatabaseExecuteCommand GetInsertExecuteDbCommand(IQueryTranslator translator, RdbCommand command)
+        DatabaseExecutionCommand GetInsertExecuteDbCommand(IQueryTranslator translator, DefaultCommand command)
         {
             string objectName = DataManager.GetEntityObjectName(DatabaseServerType.SQLServer, command.EntityType, command.ObjectName);
             var fields = DataManager.GetEditFields(DatabaseServerType.SQLServer, command.EntityType);
@@ -256,7 +256,7 @@ namespace EZNEW.Data.SqlServer
             string cmdText = $"INSERT INTO {SqlServerFactory.WrapKeyword(objectName)} ({string.Join(",", insertFormatResult.Item1)}) VALUES ({string.Join(",", insertFormatResult.Item2)});";
             CommandParameters parameters = insertFormatResult.Item3;
             translator.ParameterSequence += fieldCount;
-            return new DatabaseExecuteCommand()
+            return new DatabaseExecutionCommand()
             {
                 CommandText = cmdText,
                 CommandType = SqlServerFactory.GetCommandType(command),
@@ -271,7 +271,7 @@ namespace EZNEW.Data.SqlServer
         /// <param name="translator">Translator</param>
         /// <param name="command">Command</param>
         /// <returns>Return an update execute command</returns>
-        DatabaseExecuteCommand GetUpdateExecuteDbCommand(IQueryTranslator translator, RdbCommand command)
+        DatabaseExecutionCommand GetUpdateExecuteDbCommand(IQueryTranslator translator, DefaultCommand command)
         {
             #region query translate
 
@@ -303,13 +303,13 @@ namespace EZNEW.Data.SqlServer
                     parameterSequence++;
                     parameterName = SqlServerFactory.FormatParameterName(parameterName, parameterSequence);
                     parameters.Rename(field.PropertyName, parameterName);
-                    if (parameterValue is IModifyValue)
+                    if (parameterValue is IModificationValue)
                     {
-                        var modifyValue = parameterValue as IModifyValue;
+                        var modifyValue = parameterValue as IModificationValue;
                         parameters.ModifyValue(parameterName, modifyValue.Value);
-                        if (parameterValue is CalculateModifyValue)
+                        if (parameterValue is CalculationModificationValue)
                         {
-                            var calculateModifyValue = parameterValue as CalculateModifyValue;
+                            var calculateModifyValue = parameterValue as CalculationModificationValue;
                             string calChar = SqlServerFactory.GetCalculateChar(calculateModifyValue.Operator);
                             newValueExpression = $"{translator.ObjectPetName}.{SqlServerFactory.WrapKeyword(field.FieldName)}{calChar}{SqlServerFactory.ParameterPrefix}{parameterName}";
                         }
@@ -333,7 +333,7 @@ namespace EZNEW.Data.SqlServer
 
             #endregion
 
-            return new DatabaseExecuteCommand()
+            return new DatabaseExecutionCommand()
             {
                 CommandText = cmdText,
                 CommandType = SqlServerFactory.GetCommandType(command),
@@ -349,7 +349,7 @@ namespace EZNEW.Data.SqlServer
         /// <param name="translator">Translator</param>
         /// <param name="command">Command</param>
         /// <returns>Return a delete execute command</returns>
-        DatabaseExecuteCommand GetDeleteExecuteDbCommand(IQueryTranslator translator, RdbCommand command)
+        DatabaseExecutionCommand GetDeleteExecuteDbCommand(IQueryTranslator translator, DefaultCommand command)
         {
             #region query translate
 
@@ -379,7 +379,7 @@ namespace EZNEW.Data.SqlServer
 
             #endregion
 
-            return new DatabaseExecuteCommand()
+            return new DatabaseExecutionCommand()
             {
                 CommandText = cmdText,
                 CommandType = SqlServerFactory.GetCommandType(command),
@@ -469,7 +469,7 @@ namespace EZNEW.Data.SqlServer
             using (var conn = SqlServerFactory.GetConnection(server))
             {
                 var tran = SqlServerFactory.GetQueryTransaction(conn, command.Query);
-                var cmdDefinition = new CommandDefinition(cmdText, parameters, transaction: tran, commandType: SqlServerFactory.GetCommandType(command as RdbCommand), cancellationToken: command.Query?.GetCancellationToken() ?? default);
+                var cmdDefinition = new CommandDefinition(cmdText, parameters, transaction: tran, commandType: SqlServerFactory.GetCommandType(command as DefaultCommand), cancellationToken: command.Query?.GetCancellationToken() ?? default);
                 var data = await conn.QueryAsync<T>(cmdDefinition).ConfigureAwait(false);
                 return data;
             }
@@ -585,7 +585,7 @@ namespace EZNEW.Data.SqlServer
             using (var conn = SqlServerFactory.GetConnection(server))
             {
                 var tran = SqlServerFactory.GetQueryTransaction(conn, command.Query);
-                var cmdDefinition = new CommandDefinition(cmdText, parameters, transaction: tran, commandType: SqlServerFactory.GetCommandType(command as RdbCommand), cancellationToken: command.Query?.GetCancellationToken() ?? default);
+                var cmdDefinition = new CommandDefinition(cmdText, parameters, transaction: tran, commandType: SqlServerFactory.GetCommandType(command as DefaultCommand), cancellationToken: command.Query?.GetCancellationToken() ?? default);
                 return await conn.QueryAsync<T>(cmdDefinition).ConfigureAwait(false);
             }
         }
@@ -765,7 +765,7 @@ namespace EZNEW.Data.SqlServer
             using (var conn = SqlServerFactory.GetConnection(server))
             {
                 var tran = SqlServerFactory.GetQueryTransaction(conn, command.Query);
-                var cmdDefinition = new CommandDefinition(cmdText, parameters, transaction: tran, commandType: SqlServerFactory.GetCommandType(command as RdbCommand), cancellationToken: command.Query?.GetCancellationToken() ?? default);
+                var cmdDefinition = new CommandDefinition(cmdText, parameters, transaction: tran, commandType: SqlServerFactory.GetCommandType(command as DefaultCommand), cancellationToken: command.Query?.GetCancellationToken() ?? default);
                 return await conn.ExecuteScalarAsync<T>(cmdDefinition).ConfigureAwait(false);
             }
         }
@@ -784,7 +784,7 @@ namespace EZNEW.Data.SqlServer
             {
                 var tran = SqlServerFactory.GetQueryTransaction(conn, command.Query);
                 DynamicParameters parameters = SqlServerFactory.ConvertCmdParameters(SqlServerFactory.ParseParameters(command.Parameters));
-                var cmdDefinition = new CommandDefinition(command.CommandText, parameters, transaction: tran, commandType: SqlServerFactory.GetCommandType(command as RdbCommand), cancellationToken: command.Query?.GetCancellationToken() ?? default);
+                var cmdDefinition = new CommandDefinition(command.CommandText, parameters, transaction: tran, commandType: SqlServerFactory.GetCommandType(command as DefaultCommand), cancellationToken: command.Query?.GetCancellationToken() ?? default);
                 using (var reader = await conn.ExecuteReaderAsync(cmdDefinition).ConfigureAwait(false))
                 {
                     DataSet dataSet = new DataSet();

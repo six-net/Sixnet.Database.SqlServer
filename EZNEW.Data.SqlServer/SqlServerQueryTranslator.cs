@@ -2,12 +2,12 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using EZNEW.Develop.Command;
-using EZNEW.Develop.CQuery;
-using EZNEW.Develop.CQuery.CriteriaConverter;
-using EZNEW.Develop.CQuery.Translator;
-using EZNEW.Develop.Entity;
-using EZNEW.Fault;
+using EZNEW.Development.Command;
+using EZNEW.Development.Query;
+using EZNEW.Development.Query.CriteriaConverter;
+using EZNEW.Development.Query.Translator;
+using EZNEW.Development.Entity;
+using EZNEW.Exceptions;
 
 namespace EZNEW.Data.SqlServer
 {
