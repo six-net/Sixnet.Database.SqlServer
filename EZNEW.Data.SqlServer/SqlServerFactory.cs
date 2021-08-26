@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Data.SqlClient;
 using System.Linq;
-using EZNEW.Dapper;
+using Dapper;
 using EZNEW.Data.CriteriaConverter;
 using EZNEW.Development.Command;
 using EZNEW.Development.Command.Modification;

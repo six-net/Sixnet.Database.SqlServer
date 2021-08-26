@@ -11,7 +11,7 @@ using EZNEW.Development.Command;
 using EZNEW.Development.Command.Modification;
 using EZNEW.Exceptions;
 using EZNEW.Data.Configuration;
-using EZNEW.Dapper;
+using Dapper;
 using System.Data.SqlClient;
 
 namespace EZNEW.Data.SqlServer
@@ -60,7 +60,7 @@ namespace EZNEW.Data.SqlServer
 
             IQueryTranslator translator = SqlServerFactory.GetQueryTranslator(server);
             List<DatabaseExecutionCommand> executeCommands = new List<DatabaseExecutionCommand>();
-            var batchExecuteConfig = DataManager.GetBatchExecuteConfiguration(server.ServerType) ?? BatchExecuteConfiguration.Default;
+            var batchExecuteConfig = DataManager.GetBatchExecutionConfiguration(server.ServerType) ?? BatchExecutionConfiguration.Default;
             var groupStatementsCount = batchExecuteConfig.GroupStatementsCount;
             groupStatementsCount = groupStatementsCount < 0 ? 1 : groupStatementsCount;
             var groupParameterCount = batchExecuteConfig.GroupParametersCount;
@@ -561,12 +561,12 @@ namespace EZNEW.Data.SqlServer
                     var outputFormatedField = string.Join(",", SqlServerFactory.FormatQueryFields(translator.ObjectPetName, queryFields, true));
                     if (string.IsNullOrWhiteSpace(tranResult.CombineScript))
                     {
-                        cmdText = $"{tranResult.PreScript}SELECT COUNT({translator.ObjectPetName}.{SqlServerFactory.WrapKeyword(defaultFieldName)}) OVER() AS QueryDataTotalCount,{outputFormatedField} FROM {SqlServerFactory.WrapKeyword(objectName)} AS {translator.ObjectPetName} {joinScript} {(string.IsNullOrWhiteSpace(tranResult.ConditionString) ? string.Empty : $"WHERE {tranResult.ConditionString}")} ORDER BY {(string.IsNullOrWhiteSpace(tranResult.OrderString) ? $"{translator.ObjectPetName}.{SqlServerFactory.WrapKeyword(defaultFieldName)} DESC" : tranResult.OrderString)} OFFSET {offsetNum} ROWS FETCH NEXT {size} ROWS ONLY";
+                        cmdText = $"{tranResult.PreScript}SELECT COUNT({translator.ObjectPetName}.{SqlServerFactory.WrapKeyword(defaultFieldName)}) OVER() AS {DataManager.PagingTotalCountFieldName},{outputFormatedField} FROM {SqlServerFactory.WrapKeyword(objectName)} AS {translator.ObjectPetName} {joinScript} {(string.IsNullOrWhiteSpace(tranResult.ConditionString) ? string.Empty : $"WHERE {tranResult.ConditionString}")} ORDER BY {(string.IsNullOrWhiteSpace(tranResult.OrderString) ? $"{translator.ObjectPetName}.{SqlServerFactory.WrapKeyword(defaultFieldName)} DESC" : tranResult.OrderString)} OFFSET {offsetNum} ROWS FETCH NEXT {size} ROWS ONLY";
                     }
                     else
                     {
                         var innerFormatedField = string.Join(",", SqlServerFactory.FormatQueryFields(translator.ObjectPetName, queryFields, false));
-                        cmdText = $"{tranResult.PreScript}SELECT COUNT({translator.ObjectPetName}.{SqlServerFactory.WrapKeyword(defaultFieldName)}) OVER() AS QueryDataTotalCount,{outputFormatedField} FROM (SELECT {innerFormatedField} FROM {SqlServerFactory.WrapKeyword(objectName)} AS {translator.ObjectPetName} {joinScript} {(string.IsNullOrWhiteSpace(tranResult.ConditionString) ? string.Empty : $"WHERE {tranResult.ConditionString}")} {tranResult.CombineScript}) AS {translator.ObjectPetName} ORDER BY {(string.IsNullOrWhiteSpace(tranResult.OrderString) ? $"{translator.ObjectPetName}.{SqlServerFactory.WrapKeyword(defaultFieldName)} DESC" : tranResult.OrderString)} OFFSET {offsetNum} ROWS FETCH NEXT {size} ROWS ONLY";
+                        cmdText = $"{tranResult.PreScript}SELECT COUNT({translator.ObjectPetName}.{SqlServerFactory.WrapKeyword(defaultFieldName)}) OVER() AS {DataManager.PagingTotalCountFieldName},{outputFormatedField} FROM (SELECT {innerFormatedField} FROM {SqlServerFactory.WrapKeyword(objectName)} AS {translator.ObjectPetName} {joinScript} {(string.IsNullOrWhiteSpace(tranResult.ConditionString) ? string.Empty : $"WHERE {tranResult.ConditionString}")} {tranResult.CombineScript}) AS {translator.ObjectPetName} ORDER BY {(string.IsNullOrWhiteSpace(tranResult.OrderString) ? $"{translator.ObjectPetName}.{SqlServerFactory.WrapKeyword(defaultFieldName)} DESC" : tranResult.OrderString)} OFFSET {offsetNum} ROWS FETCH NEXT {size} ROWS ONLY";
                     }
                     break;
             }
