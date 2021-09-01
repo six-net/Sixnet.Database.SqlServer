@@ -194,14 +194,7 @@ namespace EZNEW.Data.SqlServer
                             var joinConnection = GetJoinCondition(query, joinItem, objectName, joinObjName);
                             if (!string.IsNullOrWhiteSpace(joinQueryResult.ConditionString))
                             {
-                                if (joinQueryResult.AllowJoin && PositionJoinConditionToConnection(joinItem.JoinType))
-                                {
-                                    joinConnection += $"{(string.IsNullOrWhiteSpace(joinConnection) ? " ON" : " AND ")}{joinQueryResult.ConditionString}";
-                                }
-                                else
-                                {
-                                    conditionBuilder.Append($"{(conditionBuilder.Length == 0 ? string.Empty : " AND ")}{joinQueryResult.ConditionString}");
-                                }
+                                conditionBuilder.Append($"{(conditionBuilder.Length == 0 ? string.Empty : " AND ")}{joinQueryResult.ConditionString}");
                             }
 
                             joinBuilder.Append($" {GetJoinOperator(joinItem.JoinType)} {SqlServerFactory.WrapKeyword(DataManager.GetQueryRelationObjectName(DatabaseServerType.SQLServer, joinItem.JoinQuery))} AS {joinObjName}{joinConnection}");
@@ -522,26 +515,6 @@ namespace EZNEW.Data.SqlServer
         string GetJoinOperator(JoinType joinType)
         {
             return joinOperatorDict[joinType];
-        }
-
-        /// <summary>
-        /// Determines whether position join condition to connection
-        /// </summary>
-        /// <param name="joinType">Join type</param>
-        /// <returns></returns>
-        bool PositionJoinConditionToConnection(JoinType joinType)
-        {
-            switch (joinType)
-            {
-                case JoinType.CrossJoin:
-                    return false;
-                case JoinType.InnerJoin:
-                case JoinType.LeftJoin:
-                case JoinType.RightJoin:
-                case JoinType.FullJoin:
-                default:
-                    return true;
-            }
         }
 
         /// <summary>
