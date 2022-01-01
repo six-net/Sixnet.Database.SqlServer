@@ -8,7 +8,7 @@ namespace EZNEW.Data.SqlServer
     /// <summary>
     /// SqlServer bulk insert options
     /// </summary>
-    public class SqlServerBulkInsertOptions : IBulkInsertOptions
+    public class SqlServerBulkInsertOptions : IBulkInsertionOptions
     {
         /// <summary>
         //  Returns a collection of System.Data.SqlClient.SqlBulkCopyColumnMapping items.
@@ -30,7 +30,7 @@ namespace EZNEW.Data.SqlServer
         public int BatchSize { get; set; }
 
         /// <summary>
-        /// Whether use transaction
+        /// Indicates whether use transaction
         /// Default is false
         /// </summary>
         public bool UseTransaction { get; set; }

@@ -4,32 +4,33 @@ using System.Data;
 using System.Data.SqlClient;
 using System.Linq;
 using Dapper;
-using EZNEW.Data.CriteriaConverter;
 using EZNEW.Development.Command;
-using EZNEW.Development.Command.Modification;
 using EZNEW.Development.Query;
-using EZNEW.Development.Query.CriteriaConverter;
-using EZNEW.Development.Query.Translator;
+using EZNEW.Development.Query.Translation;
 using EZNEW.Development.DataAccess;
 using EZNEW.Development.Entity;
-using EZNEW.Diagnostics;
-using EZNEW.Exceptions;
 using EZNEW.Logging;
-using EZNEW.Serialization;
+using EZNEW.Data.Conversion;
+using EZNEW.Exceptions;
 
 namespace EZNEW.Data.SqlServer
 {
     /// <summary>
-    /// Database server factory
+    /// Defines sqlserver manager
     /// </summary>
-    internal static class SqlServerFactory
+    internal static class SqlServerManager
     {
         #region Fields
 
         /// <summary>
+        /// Gets current database server type
+        /// </summary>
+        internal const DatabaseServerType CurrentDatabaseServerType = DatabaseServerType.SQLServer;
+
+        /// <summary>
         /// Field format key
         /// </summary>
-        internal static readonly string FieldFormatKey = ((int)DatabaseServerType.SQLServer).ToString();
+        internal static readonly string FieldFormatKey = ((int)CurrentDatabaseServerType).ToString();
 
         /// <summary>
         /// Parameter prefix
@@ -47,9 +48,9 @@ namespace EZNEW.Data.SqlServer
         internal const string KeywordSuffix = "]";
 
         /// <summary>
-        /// Calculate operators
+        /// Calculation operators
         /// </summary>
-        internal static readonly Dictionary<CalculationOperator, string> CalculateOperators = new Dictionary<CalculationOperator, string>(4)
+        internal static readonly Dictionary<CalculationOperator, string> CalculationOperators = new Dictionary<CalculationOperator, string>(4)
         {
             [CalculationOperator.Add] = "+",
             [CalculationOperator.Subtract] = "-",
@@ -58,9 +59,9 @@ namespace EZNEW.Data.SqlServer
         };
 
         /// <summary>
-        /// Aggregate functions
+        /// Aggregation functions
         /// </summary>
-        internal static readonly Dictionary<CommandOperationType, string> AggregateFunctions = new Dictionary<CommandOperationType, string>(5)
+        internal static readonly Dictionary<CommandOperationType, string> AggregationFunctions = new Dictionary<CommandOperationType, string>(5)
         {
             [CommandOperationType.Max] = "MAX",
             [CommandOperationType.Min] = "MIN",
@@ -68,6 +69,16 @@ namespace EZNEW.Data.SqlServer
             [CommandOperationType.Avg] = "AVG",
             [CommandOperationType.Count] = "COUNT",
         };
+
+        /// <summary>
+        /// Default field converter
+        /// </summary>
+        static readonly SqlServerDefaultFieldConverter DefaultFieldConverter = new SqlServerDefaultFieldConverter();
+
+        /// <summary>
+        /// Database provider type
+        /// </summary>
+        static readonly Type ProviderType = typeof(SqlServerProvider);
 
         #endregion
 
@@ -90,59 +101,47 @@ namespace EZNEW.Data.SqlServer
         /// <summary>
         /// Get query translator
         /// </summary>
-        /// <param name="server">Database server</param>
+        /// <param name="dataAccessContext">Data access context</param>
         /// <returns>Return query translator</returns>
-        internal static IQueryTranslator GetQueryTranslator(DatabaseServer server)
+        internal static IQueryTranslator GetQueryTranslator(DataAccessContext dataAccessContext)
         {
-            return DataManager.GetQueryTranslator(server.ServerType) ?? new SqlServerQueryTranslator();
+            if (dataAccessContext?.Server == null)
+            {
+                throw new ArgumentNullException($"{nameof(DataAccessContext.Server)}");
+            }
+            var translator = DataManager.GetQueryTranslator(dataAccessContext.Server.ServerType) ?? new SqlServerQueryTranslator();
+            translator.DataAccessContext = dataAccessContext;
+            return translator;
         }
 
         #endregion
 
-        #region Criteria converter
+        #region Field conversion
 
         /// <summary>
-        /// Parse criteria converter
+        /// Convert field
         /// </summary>
-        /// <param name="converter">Criteria converter</param>
+        /// <param name="server">Database server</param>
+        /// <param name="conversionOptions">Field conversion options</param>
         /// <param name="objectName">Object name</param>
         /// <param name="fieldName">Field name</param>
-        /// <returns>Reeturn format value</returns>
-        internal static string ParseCriteriaConverter(ICriteriaConverter converter, string objectName, string fieldName)
+        /// <returns>Return field conversion result</returns>
+        internal static FieldConversionResult ConvertField(DatabaseServer server, FieldConversionOptions conversionOptions, string objectName, string fieldName)
         {
-            var criteriaConverterParse = DataManager.GetCriteriaConverterParser(converter?.Name) ?? Parse;
-            return criteriaConverterParse(new CriteriaConverterParseOptions()
+            if (string.IsNullOrWhiteSpace(conversionOptions?.ConversionName))
             {
-                CriteriaConverter = converter,
-                ServerType = DatabaseServerType.SQLServer,
-                ObjectName = objectName,
-                FieldName = fieldName
-            });
-        }
+                return null;
+            }
 
-        /// <summary>
-        /// Parse
-        /// </summary>
-        /// <param name="converterParseOption">Converter parse option</param>
-        /// <returns></returns>
-        static string Parse(CriteriaConverterParseOptions converterParseOption)
-        {
-            if (string.IsNullOrWhiteSpace(converterParseOption?.CriteriaConverter?.Name))
+            IFieldConverter fieldConverter = DataManager.GetFieldConverter(conversionOptions.ConversionName) ?? DefaultFieldConverter;
+            return fieldConverter.Convert(new FieldConversionContext()
             {
-                throw new EZNEWException("Criteria convert config name is null or empty");
-            }
-            string format = null;
-            switch (converterParseOption.CriteriaConverter.Name)
-            {
-                case CriteriaConverterNames.StringLength:
-                    format = $"LEN({converterParseOption.ObjectName}.{WrapKeyword(converterParseOption.FieldName)})";
-                    break;
-            }
-            if (string.IsNullOrWhiteSpace(format))
-            {
-                throw new EZNEWException($"Cann't resolve criteria convert:{converterParseOption.CriteriaConverter.Name} for SQL Server");
-            }
-            return format;
+                ConversionName = conversionOptions.ConversionName,
+                Parameter = conversionOptions.Parameter,
+                FieldName = fieldName,
+                ObjectName = objectName,
+                Server = server
+            });
         }
 
         #endregion
@@ -150,12 +149,12 @@ namespace EZNEW.Data.SqlServer
         #region Framework log
 
         /// <summary>
-        /// Log execute command
+        /// Log execution command
         /// </summary>
-        /// <param name="command">Execte command</param>
+        /// <param name="command">Exection command</param>
         internal static void LogExecutionCommand(DatabaseExecutionCommand command)
         {
-            FrameworkLogManager.LogDatabaseExecutionCommand(DatabaseServerType.SQLServer, command);
+            FrameworkLogManager.LogDatabaseExecutionCommand(ProviderType, CurrentDatabaseServerType, command);
         }
 
         /// <summary>
@@ -165,7 +164,7 @@ namespace EZNEW.Data.SqlServer
         /// <param name="parameter">Parameter</param>
         internal static void LogScript(string script, object parameter)
         {
-            FrameworkLogManager.LogDatabaseScript(DatabaseServerType.SQLServer, script, parameter);
+            FrameworkLogManager.LogDatabaseScript(ProviderType, CurrentDatabaseServerType, script, parameter);
         }
 
         #endregion
@@ -179,72 +178,75 @@ namespace EZNEW.Data.SqlServer
         /// <returns>Return command type</returns>
         public static CommandType GetCommandType(DefaultCommand command)
         {
-            return command.CommandType == CommandTextType.Procedure ? CommandType.StoredProcedure : CommandType.Text;
+            return command.TextType == CommandTextType.Procedure ? CommandType.StoredProcedure : CommandType.Text;
         }
 
         #endregion
 
-        #region Get calculate sign
+        #region Get system calculation operator
 
         /// <summary>
-        /// Get calculate sign
+        /// Get system calculation operator
         /// </summary>
-        /// <param name="calculate">Calculate operator</param>
-        /// <returns>Return calculate char</returns>
-        public static string GetCalculateChar(CalculationOperator calculate)
+        /// <param name="calculationOperator">Calculation operator</param>
+        /// <returns>Return system calculation operator</returns>
+        public static string GetSystemCalculationOperator(CalculationOperator calculationOperator)
         {
-            CalculateOperators.TryGetValue(calculate, out var opearterChar);
-            return opearterChar;
+            CalculationOperators.TryGetValue(calculationOperator, out var systemCalculationOperator);
+            return systemCalculationOperator;
         }
 
         #endregion
 
-        #region Get aggregate function name
+        #region Get aggregation function name
 
         /// <summary>
-        /// Get aggregate function name
+        /// Get aggregation function name
         /// </summary>
         /// <param name="funcType">Function type</param>
-        /// <returns>Return aggregate function name</returns>
-        public static string GetAggregateFunctionName(CommandOperationType funcType)
+        /// <returns>Return aggregation function name</returns>
+        public static string GetAggregationFunctionName(CommandOperationType funcType)
         {
-            AggregateFunctions.TryGetValue(funcType, out var funcName);
+            AggregationFunctions.TryGetValue(funcType, out var funcName);
             return funcName;
         }
 
         #endregion
 
-        #region Aggregate operate must need field
+        #region Check aggregation field
 
         /// <summary>
-        /// Aggregate operate must need field
+        /// Indicates aggregation operation must need field
         /// </summary>
-        /// <param name="operateType">Operate type</param>
+        /// <param name="operationType">Operation type</param>
         /// <returns></returns>
-        public static bool AggregateOperateMustNeedField(CommandOperationType operateType)
+        public static bool CheckAggregationOperationMustNeedField(CommandOperationType operationType)
         {
-            return operateType != CommandOperationType.Count;
+            return operationType != CommandOperationType.Count;
         }
 
         #endregion
 
-        #region Format insert fields
+        #region Format insertion fields
 
         /// <summary>
-        /// Format insert fields
+        /// Format insertion fields
         /// </summary>
+        /// <param name="entityType">Entity type</param>
+        /// <param name="fieldCount">Field count</param>
         /// <param name="fields">Fields</param>
         /// <param name="parameters">Parameters</param>
-        /// <returns>first:fields,second:parameter fields,third:parameters</returns>
-        public static Tuple<List<string>, List<string>, CommandParameters> FormatInsertFields(int fieldCount, IEnumerable<EntityField> fields, object parameters, int parameterSequence)
+        /// <param name="parameterSequence">Parameter sequence</param>
+        /// <returns>First:fields,Second:parameter fields,Third:parameters</returns>
+        public static Tuple<List<string>, List<string>, CommandParameters> FormatInsertionFields(Type entityType, int fieldCount, IEnumerable<EntityField> fields, object parameters, int parameterSequence)
         {
             if (fields.IsNullOrEmpty())
             {
-                return null;
+                throw new EZNEWException($"Entity type {entityType?.Name} not set fields for insertion.");
             }
             List<string> formatFields = new List<string>(fieldCount);
             List<string> parameterFields = new List<string>(fieldCount);
-            CommandParameters cmdParameters = ParseParameters(parameters);
+            CommandParameters cmdParameters = ConvertParameter(parameters);
             foreach (var field in fields)
             {
                 //fields
@@ -266,33 +268,34 @@ namespace EZNEW.Data.SqlServer
         #region Format fields
 
         /// <summary>
-        /// Format fields
+        /// Format query fields
         /// </summary>
-        /// <param name="databasePetName">Database object name</param>
-        /// <param name="query">Query object</param>
+        /// <param name="objectPetName">Object pet name</param>
+        /// <param name="query">Query</param>
         /// <param name="entityType">Entity type</param>
-        /// <param name="forceMustFields">Whether return must query fields</param>
+        /// <param name="forceNecessaryFields">Whether force include necessary fields</param>
+        /// <param name="conversionFieldName">Indicates whether conversion field name</param>
         /// <returns></returns>
-        public static IEnumerable<string> FormatQueryFields(string databasePetName, IQuery query, Type entityType, bool forceMustFields, bool convertField)
+        public static IEnumerable<string> FormatQueryFields(string objectPetName, IQuery query, Type entityType, bool forceNecessaryFields, bool conversionFieldName)
         {
             if (query == null || entityType == null)
             {
                 return Array.Empty<string>();
             }
-            var queryFields = GetQueryFields(query, entityType, forceMustFields);
-            return queryFields?.Select(field => FormatField(databasePetName, field, convertField)) ?? Array.Empty<string>();
+            var queryFields = GetQueryFields(query, entityType, forceNecessaryFields);
+            return queryFields?.Select(field => FormatField(objectPetName, field, conversionFieldName)) ?? Array.Empty<string>();
         }
 
         /// <summary>
         /// Format query fields
         /// </summary>
-        /// <param name="databasePetName">Database name</param>
+        /// <param name="objectPetName">Object pet name</param>
         /// <param name="fields">Fields</param>
-        /// <param name="convertField">Whether convert field</param>
+        /// <param name="conversionFieldName">Whether convert field</param>
         /// <returns></returns>
-        public static IEnumerable<string> FormatQueryFields(string databasePetName, IEnumerable<EntityField> fields, bool convertField)
+        public static IEnumerable<string> FormatQueryFields(string objectPetName, IEnumerable<EntityField> fields, bool conversionFieldName)
         {
-            return fields?.Select(field => FormatField(databasePetName, field, convertField)) ?? Array.Empty<string>();
+            return fields?.Select(field => FormatField(objectPetName, field, conversionFieldName)) ?? Array.Empty<string>();
         }
 
         #endregion
@@ -302,21 +305,22 @@ namespace EZNEW.Data.SqlServer
         /// <summary>
         /// Format field
         /// </summary>
-        /// <param name="databaseObjectName">Database object name</param>
+        /// <param name="objectPetName">Object pet name</param>
         /// <param name="field">Field</param>
-        /// <returns>Return field format value</returns>
-        public static string FormatField(string databaseObjectName, EntityField field, bool convertField)
+        /// <param name="conversionFieldName">Whether converion field name</param>
+        /// <returns></returns>
+        public static string FormatField(string objectPetName, EntityField field, bool conversionFieldName)
         {
             if (field == null)
             {
                 return string.Empty;
             }
-            string formatValue = $"{databaseObjectName}.{WrapKeyword(field.FieldName)}";
+            string formatValue = $"{objectPetName}.{WrapKeyword(field.FieldName)}";
             if (!string.IsNullOrWhiteSpace(field.QueryFormat))
             {
                 formatValue = string.Format(field.QueryFormat + " AS {1}", formatValue, WrapKeyword(field.PropertyName));
             }
-            else if (field.FieldName != field.PropertyName && convertField)
+            else if (field.FieldName != field.PropertyName && conversionFieldName)
             {
                 formatValue = $"{formatValue} AS {WrapKeyword(field.PropertyName)}";
             }
@@ -346,11 +350,11 @@ namespace EZNEW.Data.SqlServer
         /// </summary>
         /// <param name="query">Query</param>
         /// <param name="entityType">Entity type</param>
-        /// <param name="forceMustFields">Whether return must query fields</param>
+        /// <param name="forceNecessaryFields">Whether include necessary fields</param>
         /// <returns></returns>
-        public static IEnumerable<EntityField> GetQueryFields(IQuery query, Type entityType, bool forceMustFields)
+        public static IEnumerable<EntityField> GetQueryFields(IQuery query, Type entityType, bool forceNecessaryFields)
         {
-            return DataManager.GetQueryFields(DatabaseServerType.SQLServer, entityType, query, forceMustFields);
+            return DataManager.GetQueryFields(CurrentDatabaseServerType, entityType, query, forceNecessaryFields);
         }
 
         /// <summary>
@@ -361,7 +365,7 @@ namespace EZNEW.Data.SqlServer
         /// <returns>Return fields</returns>
         public static IEnumerable<EntityField> GetFields(Type entityType, IEnumerable<string> propertyNames)
         {
-            return DataManager.GetFields(DatabaseServerType.SQLServer, entityType, propertyNames);
+            return DataManager.GetFields(CurrentDatabaseServerType, entityType, propertyNames);
         }
 
         #endregion
@@ -379,7 +383,7 @@ namespace EZNEW.Data.SqlServer
             {
                 return string.Empty;
             }
-            return DataManager.GetDefaultField(DatabaseServerType.SQLServer, entityType)?.FieldName ?? string.Empty;
+            return DataManager.GetDefaultField(CurrentDatabaseServerType, entityType)?.FieldName ?? string.Empty;
         }
 
         #endregion
@@ -399,46 +403,16 @@ namespace EZNEW.Data.SqlServer
 
         #endregion
 
-        #region Parse parameter
+        #region Convert parameter
 
         /// <summary>
-        /// Parse parameter
+        /// Convert parameter
         /// </summary>
-        /// <param name="originalParameters">Original parameter</param>
+        /// <param name="originalParameter">Original parameter</param>
         /// <returns>Return command parameters</returns>
-        public static CommandParameters ParseParameters(object originalParameters)
+        public static CommandParameters ConvertParameter(object originalParameter)
         {
-            if (originalParameters == null)
-            {
-                return null;
-            }
-            if (originalParameters is CommandParameters commandParameters)
-            {
-                return commandParameters;
-            }
-            commandParameters = new CommandParameters();
-            if (originalParameters is IEnumerable<KeyValuePair<string, string>> stringParametersDict)
-            {
-                commandParameters.Add(stringParametersDict);
-            }
-            else if (originalParameters is IEnumerable<KeyValuePair<string, dynamic>> dynamicParametersDict)
-            {
-                commandParameters.Add(dynamicParametersDict);
-            }
-            else if (originalParameters is IEnumerable<KeyValuePair<string, object>> objectParametersDict)
-            {
-                commandParameters.Add(objectParametersDict);
-            }
-            else if (originalParameters is IEnumerable<KeyValuePair<string, IModificationValue>> modifyParametersDict)
-            {
-                commandParameters.Add(modifyParametersDict);
-            }
-            else
-            {
-                objectParametersDict = originalParameters.ObjectToDcitionary();
-                commandParameters.Add(objectParametersDict);
-            }
-            return commandParameters;
+            return CommandParameters.Parse(originalParameter);
         }
 
         #endregion
@@ -452,20 +426,7 @@ namespace EZNEW.Data.SqlServer
         /// <returns>Return dynamic parameters</returns>
         public static DynamicParameters ConvertCmdParameters(CommandParameters commandParameters)
         {
-            if (commandParameters?.Parameters.IsNullOrEmpty() ?? true)
-            {
-                return null;
-            }
-            DynamicParameters dynamicParameters = new DynamicParameters();
-            foreach (var item in commandParameters.Parameters)
-            {
-                var parameter = DataManager.HandleParameter(DatabaseServerType.SQLServer, item.Value);
-                dynamicParameters.Add(parameter.Name, parameter.Value
-                                    , parameter.DbType, parameter.ParameterDirection
-                                    , parameter.Size, parameter.Precision
-                                    , parameter.Scale);
-            }
-            return dynamicParameters;
+            return commandParameters?.ConvertToDynamicParameters(CurrentDatabaseServerType);
         }
 
         #endregion
@@ -481,7 +442,7 @@ namespace EZNEW.Data.SqlServer
         {
             if (!dataIsolationLevel.HasValue)
             {
-                dataIsolationLevel = DataManager.GetDataIsolationLevel(DatabaseServerType.SQLServer);
+                dataIsolationLevel = DataManager.GetDataIsolationLevel(CurrentDatabaseServerType);
             }
             return DataManager.GetSystemIsolationLevel(dataIsolationLevel);
         }
@@ -501,7 +462,7 @@ namespace EZNEW.Data.SqlServer
             DataIsolationLevel? dataIsolationLevel = query?.IsolationLevel;
             if (!dataIsolationLevel.HasValue)
             {
-                dataIsolationLevel = DataManager.GetDataIsolationLevel(DatabaseServerType.SQLServer);
+                dataIsolationLevel = DataManager.GetDataIsolationLevel(CurrentDatabaseServerType);
             }
             var systemIsolationLevel = GetTransactionIsolationLevel(dataIsolationLevel);
             if (systemIsolationLevel.HasValue)
@@ -517,20 +478,20 @@ namespace EZNEW.Data.SqlServer
 
         #endregion
 
-        #region Get execute transaction
+        #region Get execution transaction
 
         /// <summary>
-        /// Get execute transaction
+        /// Get execution transaction
         /// </summary>
         /// <param name="connection">Connection</param>
-        /// <param name="executeOption">Execute option</param>
+        /// <param name="executionOptions">Execution options</param>
         /// <returns>Return database transaction</returns>
-        public static IDbTransaction GetExecuteTransaction(IDbConnection connection, CommandExecutionOptions executeOption)
+        public static IDbTransaction GetExecuteTransaction(IDbConnection connection, CommandExecutionOptions executionOptions)
         {
-            DataIsolationLevel? dataIsolationLevel = executeOption?.IsolationLevel;
+            DataIsolationLevel? dataIsolationLevel = executionOptions?.IsolationLevel;
             if (!dataIsolationLevel.HasValue)
             {
-                dataIsolationLevel = DataManager.GetDataIsolationLevel(DatabaseServerType.SQLServer);
+                dataIsolationLevel = DataManager.GetDataIsolationLevel(CurrentDatabaseServerType);
             }
             var systemIsolationLevel = DataManager.GetSystemIsolationLevel(dataIsolationLevel);
             if (connection.State != ConnectionState.Open)

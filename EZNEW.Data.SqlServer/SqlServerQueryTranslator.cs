@@ -4,15 +4,15 @@ using System.Linq;
 using System.Text;
 using EZNEW.Development.Command;
 using EZNEW.Development.Query;
-using EZNEW.Development.Query.CriteriaConverter;
-using EZNEW.Development.Query.Translator;
+using EZNEW.Development.Query.Translation;
 using EZNEW.Development.Entity;
 using EZNEW.Exceptions;
+using EZNEW.Data.Conversion;
 
 namespace EZNEW.Data.SqlServer
 {
     /// <summary>
-    /// Query translator implement for SqlServer
+    /// Query translator implementation for the sqlserver
     /// </summary>
     internal class SqlServerQueryTranslator : IQueryTranslator
     {
@@ -32,7 +32,7 @@ namespace EZNEW.Data.SqlServer
         const string NotNullOperator = "IS NOT NULL";
         const string DescKeyWord = "DESC";
         const string AscKeyWord = "ASC";
-        public const string ObjPetName = "TB";
+        public const string DefaultObjectPetName = "TB";
         const string TreeTableName = "RecurveTable";
         const string TreeTablePetName = "RTT";
         static readonly Dictionary<JoinType, string> joinOperatorDict = new Dictionary<JoinType, string>()
@@ -54,32 +54,41 @@ namespace EZNEW.Data.SqlServer
         /// <summary>
         /// Get the query object pet name
         /// </summary>
-        public string ObjectPetName
-        {
-            get
-            {
-                return ObjPetName;
-            }
-        }
+        public string ObjectPetName => DefaultObjectPetName;
 
         /// <summary>
         /// Gets or sets the parameter sequence
         /// </summary>
         public int ParameterSequence { get; set; } = 0;
 
+        /// <summary>
+        /// Gets or sets the data access context
+        /// </summary>
+        public DataAccessContext DataAccessContext { get; set; }
+
+        /// <summary>
+        /// Gets the database server
+        /// </summary>
+        DatabaseServer DatabaseServer => DataAccessContext.Server;
+
+        /// <summary>
+        /// Gets the database server type
+        /// </summary>
+        DatabaseServerType DatabaseServerType => SqlServerManager.CurrentDatabaseServerType;
+
         #endregion
 
         #region Functions
 
         /// <summary>
-        /// Translate Query Object
+        /// Translate query object
         /// </summary>
         /// <param name="query">Query object</param>
-        /// <returns>Return translate result</returns>
-        public TranslateResult Translate(IQuery query)
+        /// <returns>Return a translation result</returns>
+        public QueryTranslationResult Translate(IQuery query)
         {
             Init();
-            var result = ExecuteTranslate(query);
+            var result = ExecuteTranslation(query, QueryLocation.Top);
             if (!result.WithScripts.IsNullOrEmpty())
             {
                 result.PreScript = FormatWithScript(result.WithScripts);
@@ -88,43 +97,45 @@ namespace EZNEW.Data.SqlServer
         }
 
         /// <summary>
-        /// Execute Translate
+        /// Execute translation
         /// </summary>
         /// <param name="query">Query object</param>
-        /// <param name="paras">Parameters</param>
-        /// <param name="objectName">Query object name</param>
-        /// <returns>Return translate result</returns>
-        public TranslateResult ExecuteTranslate(IQuery query, CommandParameters paras = null, string objectName = "", bool subQuery = false, bool useOrder = true)
+        /// <param name="location">Query location</param>
+        /// <param name="parameters">Parameters</param>
+        /// <param name="objectName">Entity object name</param>
+        /// <param name="useSort">Indicates whether use sort</param>
+        /// <returns>Return a translation result</returns>
+        public QueryTranslationResult ExecuteTranslation(IQuery query, QueryLocation location, CommandParameters parameters = null, string objectName = "", bool useOrder = true)
         {
             if (query == null)
             {
-                return TranslateResult.Empty;
+                return QueryTranslationResult.Empty;
             }
             StringBuilder conditionBuilder = new StringBuilder();
-            if (query.QueryType == QueryCommandType.QueryObject)
+            if (query.ExecutionMode == QueryExecutionMode.QueryObject)
             {
                 StringBuilder orderBuilder = new StringBuilder();
-                CommandParameters parameters = paras ?? new CommandParameters();
-                objectName = string.IsNullOrWhiteSpace(objectName) ? ObjPetName : objectName;
+                parameters = parameters ?? new CommandParameters();
+                objectName = string.IsNullOrWhiteSpace(objectName) ? DefaultObjectPetName : objectName;
                 List<string> withScripts = new List<string>();
                 string recurveTableName = string.Empty;
                 string recurveTablePetName = string.Empty;
 
-                #region query condition
+                #region condition
 
-                if (!query.Criterias.IsNullOrEmpty())
+                if (!query.Conditions.IsNullOrEmpty())
                 {
                     int index = 0;
-                    foreach (var queryItem in query.Criterias)
+                    foreach (var condition in query.Conditions)
                     {
-                        var queryItemCondition = TranslateCondition(query, queryItem, parameters, objectName);
-                        if (!queryItemCondition.WithScripts.IsNullOrEmpty())
+                        var conditionResult = TranslateCondition(query, condition, parameters, objectName);
+                        if (!conditionResult.WithScripts.IsNullOrEmpty())
                         {
-                            withScripts.AddRange(queryItemCondition.WithScripts);
-                            recurveTableName = queryItemCondition.RecurveObjectName;
-                            recurveTablePetName = queryItemCondition.RecurvePetName;
+                            withScripts.AddRange(conditionResult.WithScripts);
+                            recurveTableName = conditionResult.RecurveObjectName;
+                            recurveTablePetName = conditionResult.RecurvePetName;
                         }
-                        conditionBuilder.Append($" {(index > 0 ? queryItem.Item1.ToString() : string.Empty)} {queryItemCondition.ConditionString}");
+                        conditionBuilder.Append($" {(index > 0 ? condition.ConnectionOperator.ToString() : string.Empty)} {conditionResult.ConditionString}");
                         index++;
                     }
                 }
@@ -133,11 +144,11 @@ namespace EZNEW.Data.SqlServer
 
                 #region sort
 
-                if (useOrder && !query.Orders.IsNullOrEmpty())
+                if (useOrder && !query.Sorts.IsNullOrEmpty())
                 {
-                    foreach (var orderItem in query.Orders)
+                    foreach (var sortEntry in query.Sorts)
                     {
-                        orderBuilder.Append($"{ConvertOrderCriteriaName(query, objectName, orderItem)} {(orderItem.Desc ? DescKeyWord : AscKeyWord)},");
+                        orderBuilder.Append($"{ConvertSortFieldName(query, objectName, sortEntry)} {(sortEntry.Desc ? DescKeyWord : AscKeyWord)},");
                     }
                 }
 
@@ -146,19 +157,19 @@ namespace EZNEW.Data.SqlServer
                 #region combine
 
                 StringBuilder combineBuilder = new StringBuilder();
-                if (!query.CombineItems.IsNullOrEmpty())
+                if (!query.Combines.IsNullOrEmpty())
                 {
-                    foreach (var combine in query.CombineItems)
+                    foreach (var combineEntry in query.Combines)
                     {
-                        if (combine?.CombineQuery == null)
+                        if (combineEntry?.Query == null)
                         {
                             continue;
                         }
                         var combineObjectPetName = GetNewSubObjectPetName();
-                        string combineObjectName = DataManager.GetQueryRelationObjectName(DatabaseServerType.SQLServer, combine.CombineQuery);
-                        var combineQueryResult = ExecuteTranslate(combine.CombineQuery, parameters, combineObjectPetName, true, true);
+                        string combineObjectName = DataAccessContext.GetCombineEntityObjectName(combineEntry.Query);
+                        var combineQueryResult = ExecuteTranslation(combineEntry.Query, QueryLocation.Combine, parameters, combineObjectPetName, true);
                         string combineConditionString = string.IsNullOrWhiteSpace(combineQueryResult.ConditionString) ? string.Empty : $"WHERE {combineQueryResult.ConditionString}";
-                        combineBuilder.Append($" {GetCombineOperator(combine.CombineType)} SELECT {string.Join(",", SqlServerFactory.FormatQueryFields(combineObjectPetName, query, query.GetEntityType(), true, false))} FROM {SqlServerFactory.WrapKeyword(combineObjectName)} AS {combineObjectPetName} {(combineQueryResult.AllowJoin ? combineQueryResult.JoinScript : string.Empty)} {combineConditionString}");
+                        combineBuilder.Append($" {GetCombineOperator(combineEntry.Type)} SELECT {string.Join(",", SqlServerManager.FormatQueryFields(combineObjectPetName, query, query.GetEntityType(), true, false))} FROM {SqlServerManager.WrapKeyword(combineObjectName)} AS {combineObjectPetName} {(combineQueryResult.AllowJoin ? combineQueryResult.JoinScript : string.Empty)} {combineConditionString}");
                         if (!combineQueryResult.WithScripts.IsNullOrEmpty())
                         {
                             withScripts.AddRange(combineQueryResult.WithScripts);
@@ -175,29 +186,28 @@ namespace EZNEW.Data.SqlServer
 
                 bool allowJoin = true;
                 StringBuilder joinBuilder = new StringBuilder();
-                if (!query.JoinItems.IsNullOrEmpty())
+                if (!query.Joins.IsNullOrEmpty())
                 {
-                    foreach (var joinItem in query.JoinItems)
+                    foreach (var joinEntry in query.Joins)
                     {
-                        if (joinItem == null || joinItem.JoinQuery == null)
+                        if (joinEntry == null || joinEntry.JoinQuery == null)
                         {
                             continue;
                         }
-                        if (joinItem.JoinQuery.GetEntityType() == null)
+                        if (joinEntry.JoinQuery.GetEntityType() == null)
                         {
                             throw new EZNEWException("IQuery object must set entity type if use in join operation");
                         }
                         string joinObjName = GetNewSubObjectPetName();
-                        var joinQueryResult = ExecuteTranslate(joinItem.JoinQuery, parameters, joinObjName, true, true);
+                        var joinQueryResult = ExecuteTranslation(joinEntry.JoinQuery, QueryLocation.Join, parameters, joinObjName, true);
                         if (string.IsNullOrWhiteSpace(joinQueryResult.CombineScript))
                         {
-                            var joinConnection = GetJoinCondition(query, joinItem, objectName, joinObjName);
+                            var joinConnection = GetJoinCondition(query, joinEntry, objectName, joinObjName);
                             if (!string.IsNullOrWhiteSpace(joinQueryResult.ConditionString))
                             {
                                 conditionBuilder.Append($"{(conditionBuilder.Length == 0 ? string.Empty : " AND ")}{joinQueryResult.ConditionString}");
                             }
-
-                            joinBuilder.Append($" {GetJoinOperator(joinItem.JoinType)} {SqlServerFactory.WrapKeyword(DataManager.GetQueryRelationObjectName(DatabaseServerType.SQLServer, joinItem.JoinQuery))} AS {joinObjName}{joinConnection}");
+                            joinBuilder.Append($" {GetJoinOperator(joinEntry.JoinType)} {SqlServerManager.WrapKeyword(DataAccessContext.GetJoinEntityObjectName(joinEntry.JoinQuery))} AS {joinObjName}{joinConnection}");
                             if (joinQueryResult.AllowJoin && !string.IsNullOrWhiteSpace(joinQueryResult.JoinScript))
                             {
                                 joinBuilder.Append($" {joinQueryResult.JoinScript}");
@@ -206,8 +216,8 @@ namespace EZNEW.Data.SqlServer
                         else
                         {
                             var combineJoinObjName = GetNewSubObjectPetName();
-                            var joinConnection = GetJoinCondition(query, joinItem, objectName, combineJoinObjName);
-                            joinBuilder.Append($" {GetJoinOperator(joinItem.JoinType)} (SELECT {string.Join(",", SqlServerFactory.FormatQueryFields(joinObjName, joinItem.JoinQuery, joinItem.JoinQuery.GetEntityType(), true, false))} FROM {SqlServerFactory.WrapKeyword(DataManager.GetQueryRelationObjectName(DatabaseServerType.SQLServer, joinItem.JoinQuery))} AS {joinObjName} {(joinQueryResult.AllowJoin ? joinQueryResult.JoinScript : string.Empty)} {(string.IsNullOrWhiteSpace(joinQueryResult.ConditionString) ? string.Empty : "WHERE " + joinQueryResult.ConditionString)} {joinQueryResult.CombineScript}) AS {combineJoinObjName}{joinConnection}");
+                            var joinConnection = GetJoinCondition(query, joinEntry, objectName, combineJoinObjName);
+                            joinBuilder.Append($" {GetJoinOperator(joinEntry.JoinType)} (SELECT {string.Join(",", SqlServerManager.FormatQueryFields(joinObjName, joinEntry.JoinQuery, joinEntry.JoinQuery.GetEntityType(), true, false))} FROM {SqlServerManager.WrapKeyword(DataAccessContext.GetJoinEntityObjectName(joinEntry.JoinQuery))} AS {joinObjName} {(joinQueryResult.AllowJoin ? joinQueryResult.JoinScript : string.Empty)} {(string.IsNullOrWhiteSpace(joinQueryResult.ConditionString) ? string.Empty : "WHERE " + joinQueryResult.ConditionString)} {joinQueryResult.CombineScript}) AS {combineJoinObjName}{joinConnection}");
                         }
                         if (!joinQueryResult.WithScripts.IsNullOrEmpty())
                         {
@@ -221,30 +231,31 @@ namespace EZNEW.Data.SqlServer
 
                 #endregion
 
-                #region recurve script
+                #region recurve
 
                 string conditionString = conditionBuilder.ToString();
-                if (query.RecurveCriteria != null)
+                if (query.Recurve != null)
                 {
                     allowJoin = false;
                     string nowConditionString = conditionString;
-                    EntityField recurveField = DataManager.GetField(DatabaseServerType.SQLServer, query, query.RecurveCriteria.Key);
-                    EntityField recurveRelationField = DataManager.GetField(DatabaseServerType.SQLServer, query, query.RecurveCriteria.RelationKey);
+                    EntityField recurveField = DataManager.GetField(DatabaseServerType, query, query.Recurve.DataField);
+                    EntityField recurveRelationField = DataManager.GetField(DatabaseServerType, query, query.Recurve.RelationField);
                     var recurveTable = GetNewRecurveTableName();
                     recurveTablePetName = recurveTable.Item1;
                     recurveTableName = recurveTable.Item2;
-                    conditionString = $"{objectName}.{SqlServerFactory.WrapKeyword(recurveField.FieldName)} IN (SELECT {recurveTablePetName}.{SqlServerFactory.WrapKeyword(recurveField.FieldName)} FROM {SqlServerFactory.WrapKeyword(recurveTableName)} AS {recurveTablePetName})";
-                    string queryObjectName = DataManager.GetQueryRelationObjectName(DatabaseServerType.SQLServer, query);
+                    conditionString = $"{objectName}.{SqlServerManager.WrapKeyword(recurveField.FieldName)} IN (SELECT {recurveTablePetName}.{SqlServerManager.WrapKeyword(recurveField.FieldName)} FROM {SqlServerManager.WrapKeyword(recurveTableName)} AS {recurveTablePetName})";
+                    DataAccessContext.SetActivityQuery(query, location);
+                    string queryObjectName = DataManager.GetEntityObjectName(DataAccessContext);
                     string withScript =
-                        $"{recurveTableName} AS (SELECT {objectName}.{SqlServerFactory.WrapKeyword(recurveField.FieldName)},{objectName}.{SqlServerFactory.WrapKeyword(recurveRelationField.FieldName)} FROM {SqlServerFactory.WrapKeyword(queryObjectName)} AS {objectName} {joinScript} {(string.IsNullOrWhiteSpace(nowConditionString) ? string.Empty : $"WHERE {nowConditionString}")} " +
-                        $"UNION ALL SELECT {objectName}.{SqlServerFactory.WrapKeyword(recurveField.FieldName)},{objectName}.{SqlServerFactory.WrapKeyword(recurveRelationField.FieldName)} FROM {SqlServerFactory.WrapKeyword(queryObjectName)} AS {objectName},{recurveTableName} AS {recurveTablePetName} " +
-                        $"WHERE {(query.RecurveCriteria.Direction == RecurveDirection.Up ? $"{objectName}.{SqlServerFactory.WrapKeyword(recurveField.FieldName)}={recurveTablePetName}.{SqlServerFactory.WrapKeyword(recurveRelationField.FieldName)}" : $"{objectName}.{SqlServerFactory.WrapKeyword(recurveRelationField.FieldName)}={recurveTablePetName}.{SqlServerFactory.WrapKeyword(recurveField.FieldName)}")})";
+                        $"{recurveTableName} AS (SELECT {objectName}.{SqlServerManager.WrapKeyword(recurveField.FieldName)},{objectName}.{SqlServerManager.WrapKeyword(recurveRelationField.FieldName)} FROM {SqlServerManager.WrapKeyword(queryObjectName)} AS {objectName} {joinScript} {(string.IsNullOrWhiteSpace(nowConditionString) ? string.Empty : $"WHERE {nowConditionString}")} " +
+                        $"UNION ALL SELECT {objectName}.{SqlServerManager.WrapKeyword(recurveField.FieldName)},{objectName}.{SqlServerManager.WrapKeyword(recurveRelationField.FieldName)} FROM {SqlServerManager.WrapKeyword(queryObjectName)} AS {objectName},{recurveTableName} AS {recurveTablePetName} " +
+                        $"WHERE {(query.Recurve.Direction == RecurveDirection.Up ? $"{objectName}.{SqlServerManager.WrapKeyword(recurveField.FieldName)}={recurveTablePetName}.{SqlServerManager.WrapKeyword(recurveRelationField.FieldName)}" : $"{objectName}.{SqlServerManager.WrapKeyword(recurveRelationField.FieldName)}={recurveTablePetName}.{SqlServerManager.WrapKeyword(recurveField.FieldName)}")})";
                     withScripts.Add(withScript);
                 }
 
                 #endregion
 
-                var result = TranslateResult.CreateNewResult(conditionString, orderBuilder.ToString().Trim(','), parameters);
+                var result = QueryTranslationResult.Create(conditionString, orderBuilder.ToString().Trim(','), parameters);
                 result.JoinScript = joinScript;
                 result.AllowJoin = allowJoin;
                 result.WithScripts = withScripts;
@@ -255,47 +266,48 @@ namespace EZNEW.Data.SqlServer
             }
             else
             {
-                conditionBuilder.Append(query.QueryText);
-                return TranslateResult.CreateNewResult(conditionBuilder.ToString(), string.Empty, query.QueryTextParameters);
+                conditionBuilder.Append(query.Text);
+                return QueryTranslationResult.Create(conditionBuilder.ToString(), string.Empty, query.TextParameters);
             }
         }
 
         /// <summary>
-        /// translate query condition
+        /// Translate condition
         /// </summary>
-        /// <param name="queryItem">Query condition</param>
-        /// <returns>Return translate result</returns>
-        TranslateResult TranslateCondition(IQuery query, Tuple<QueryOperator, IQueryItem> queryItem, CommandParameters parameters, string objectName)
+        /// <param name="sourceQuery">Source query</param>
+        /// <param name="condition">Condition</param>
+        /// <param name="parameters">Parameters</param>
+        /// <param name="objectName">Object name</param>
+        /// <returns></returns>
+        QueryTranslationResult TranslateCondition(IQuery sourceQuery, ICondition condition, CommandParameters parameters, string objectName)
         {
-            if (queryItem == null)
+            if (condition == null)
             {
-                return TranslateResult.Empty;
+                return QueryTranslationResult.Empty;
             }
-            Criteria criteria = queryItem.Item2 as Criteria;
-            if (criteria != null)
+            if (condition is Criterion criterion)
             {
-                return TranslateCriteria(query, criteria, parameters, objectName);
+                return TranslateCriterion(sourceQuery, criterion, parameters, objectName);
             }
-            IQuery groupQuery = queryItem.Item2 as IQuery;
-            if (groupQuery != null && !groupQuery.Criterias.IsNullOrEmpty())
+            if (condition is IQuery groupQuery && !groupQuery.Conditions.IsNullOrEmpty())
             {
-                groupQuery.SetEntityType(query.GetEntityType());
-                var criteriasCount = groupQuery.Criterias.Count();
-                if (criteriasCount == 1)
+                groupQuery.SetEntityType(sourceQuery.GetEntityType());
+                var conditionCount = groupQuery.Conditions.Count();
+                if (conditionCount == 1)
                 {
-                    var firstCriterias = groupQuery.Criterias.First();
-                    if (firstCriterias.Item2 is Criteria)
+                    var firstCondition = groupQuery.Conditions.First();
+                    if (firstCondition is Criterion firstCriterion)
                     {
-                        return TranslateCriteria(groupQuery, firstCriterias.Item2 as Criteria, parameters, objectName);
+                        return TranslateCriterion(groupQuery, firstCriterion, parameters, objectName);
                     }
-                    return TranslateCondition(groupQuery, firstCriterias, parameters, objectName);
+                    return TranslateCondition(groupQuery, firstCondition, parameters, objectName);
                 }
                 StringBuilder subCondition = new StringBuilder("(");
                 List<string> groupWithScripts = new List<string>();
                 string recurveTableName = string.Empty;
                 string recurveTablePetName = string.Empty;
                 int index = 0;
-                foreach (var subQueryItem in groupQuery.Criterias)
+                foreach (var subQueryItem in groupQuery.Conditions)
                 {
                     var subGroupResult = TranslateCondition(groupQuery, subQueryItem, parameters, objectName);
                     if (!subGroupResult.WithScripts.IsNullOrEmpty())
@@ -304,118 +316,119 @@ namespace EZNEW.Data.SqlServer
                         recurveTablePetName = subGroupResult.RecurvePetName;
                         groupWithScripts.AddRange(subGroupResult.WithScripts);
                     }
-                    subCondition.Append($" {(index > 0 ? subQueryItem.Item1.ToString() : string.Empty)} {subGroupResult.ConditionString}");
+                    subCondition.Append($" {(index > 0 ? subQueryItem.ConnectionOperator.ToString() : string.Empty)} {subGroupResult.ConditionString}");
                     index++;
                 }
-                var groupResult = TranslateResult.CreateNewResult(subCondition.Append(")").ToString());
+                var groupResult = QueryTranslationResult.Create(subCondition.Append(")").ToString());
                 groupResult.RecurveObjectName = recurveTableName;
                 groupResult.RecurvePetName = recurveTablePetName;
                 groupResult.WithScripts = groupWithScripts;
                 return groupResult;
             }
-            return TranslateResult.Empty;
+            return QueryTranslationResult.Empty;
         }
 
         /// <summary>
-        /// Translate Single Criteria
+        /// Translate criterion
         /// </summary>
-        /// <param name="criteria">Criteria</param>
+        /// <param name="sourceQuery">Source query</param>
+        /// <param name="criterion">Criterion</param>
         /// <param name="parameters">Parameters</param>
-        /// <returns>Return translate result</returns>
-        TranslateResult TranslateCriteria(IQuery query, Criteria criteria, CommandParameters parameters, string objectName)
+        /// <param name="objectName">Object name</param>
+        /// <returns>Return query translation result</returns>
+        QueryTranslationResult TranslateCriterion(IQuery sourceQuery, Criterion criterion, CommandParameters parameters, string objectName)
         {
-            if (criteria == null)
+            if (criterion == null)
             {
-                return TranslateResult.Empty;
+                return QueryTranslationResult.Empty;
             }
-            string sqlOperator = GetOperator(criteria.Operator);
-            bool needParameter = OperatorNeedParameter(criteria.Operator);
-            string criteriaFieldName = ConvertCriteriaName(query, objectName, criteria);
+            string sqlOperator = GetOperator(criterion.Operator);
+            bool needParameter = OperatorNeedParameter(criterion.Operator);
+            string criterionFieldName = ConvertCriterionFieldName(sourceQuery, objectName, criterion);
             if (!needParameter)
             {
-                return TranslateResult.CreateNewResult($"{criteriaFieldName} {sqlOperator}");
+                return QueryTranslationResult.Create($"{criterionFieldName} {sqlOperator}");
             }
-            IQuery valueQuery = criteria.Value as IQuery;
-            string parameterName = GetNewParameterName(criteria.Name);
-            if (valueQuery != null)
+            string parameterName = GetNewParameterName(criterion.Name);
+            if (criterion.Value is IQuery subquery)
             {
-                string valueQueryObjectName = DataManager.GetQueryRelationObjectName(DatabaseServerType.SQLServer, valueQuery);
-                if (valueQuery.QueryFields.IsNullOrEmpty())
+                string subqueryObjectName = DataAccessContext.GetSubqueryEntityObjectName(subquery);
+                if (subquery.QueryFields.IsNullOrEmpty())
                 {
-                    throw new EZNEWException($"The {valueQueryObjectName} query object that is a subquery must have at least one query field set");
+                    throw new EZNEWException($"The {subqueryObjectName} query object that is a subquery must have at least one query field set");
                 }
-                var valueQueryField = DataManager.GetField(DatabaseServerType.SQLServer, valueQuery, valueQuery.QueryFields.First());
-                string subObjName = GetNewSubObjectPetName();
-                string topString = GetSubqueryLimitCondition(sqlOperator, valueQuery.QuerySize);
-                var useOrder = !string.IsNullOrWhiteSpace(topString);
-                var subQueryResult = ExecuteTranslate(valueQuery, parameters, subObjName, true, useOrder);
-                string conditionString = string.IsNullOrWhiteSpace(subQueryResult.ConditionString) ? string.Empty : $"WHERE {subQueryResult.ConditionString}";
-                string orderString = string.IsNullOrWhiteSpace(subQueryResult.OrderString) ? string.Empty : $"ORDER BY {subQueryResult.OrderString}";
-                string valueQueryCondition = string.IsNullOrWhiteSpace(subQueryResult.CombineScript)
-                    ? $"{criteriaFieldName} {sqlOperator} (SELECT {topString} {subObjName}.{SqlServerFactory.WrapKeyword(valueQueryField.FieldName)} FROM {SqlServerFactory.WrapKeyword(valueQueryObjectName)} AS {subObjName} {(subQueryResult.AllowJoin ? subQueryResult.JoinScript : string.Empty)} {conditionString} {orderString})"
-                    : $"{criteriaFieldName} {sqlOperator} (SELECT {topString} {subObjName}.{SqlServerFactory.WrapKeyword(valueQueryField.FieldName)} FROM (SELECT {string.Join(",", SqlServerFactory.FormatQueryFields(subObjName, valueQuery, valueQuery.GetEntityType(), true, false))} FROM {SqlServerFactory.WrapKeyword(valueQueryObjectName)} AS {subObjName} {(subQueryResult.AllowJoin ? subQueryResult.JoinScript : string.Empty)} {conditionString} {subQueryResult.CombineScript}) AS {subObjName} {orderString})";
-                var valueQueryResult = TranslateResult.CreateNewResult(valueQueryCondition);
-                if (!subQueryResult.WithScripts.IsNullOrEmpty())
+                var subqueryField = DataManager.GetField(DatabaseServerType, subquery, subquery.QueryFields.First());
+                string subqueryObjectPetName = GetNewSubObjectPetName();
+                string topString = GetSubqueryLimitCondition(sqlOperator, subquery.QuerySize);
+                var useSort = !string.IsNullOrWhiteSpace(topString);
+                var subqueryTranslationResult = ExecuteTranslation(subquery, QueryLocation.Subuery, parameters, subqueryObjectPetName, useSort);
+                string subqueryConditionString = string.IsNullOrWhiteSpace(subqueryTranslationResult.ConditionString) ? string.Empty : $"WHERE {subqueryTranslationResult.ConditionString}";
+                string subquerySortString = string.IsNullOrWhiteSpace(subqueryTranslationResult.SortString) ? string.Empty : $"ORDER BY {subqueryTranslationResult.SortString}";
+                string subqueryCondition = string.IsNullOrWhiteSpace(subqueryTranslationResult.CombineScript)
+                    ? $"{criterionFieldName} {sqlOperator} (SELECT {topString} {subqueryObjectPetName}.{SqlServerManager.WrapKeyword(subqueryField.FieldName)} FROM {SqlServerManager.WrapKeyword(subqueryObjectName)} AS {subqueryObjectPetName} {(subqueryTranslationResult.AllowJoin ? subqueryTranslationResult.JoinScript : string.Empty)} {subqueryConditionString} {subquerySortString})"
+                    : $"{criterionFieldName} {sqlOperator} (SELECT {topString} {subqueryObjectPetName}.{SqlServerManager.WrapKeyword(subqueryField.FieldName)} FROM (SELECT {string.Join(",", SqlServerManager.FormatQueryFields(subqueryObjectPetName, subquery, subquery.GetEntityType(), true, false))} FROM {SqlServerManager.WrapKeyword(subqueryObjectName)} AS {subqueryObjectPetName} {(subqueryTranslationResult.AllowJoin ? subqueryTranslationResult.JoinScript : string.Empty)} {subqueryConditionString} {subqueryTranslationResult.CombineScript}) AS {subqueryObjectPetName} {subquerySortString})";
+                var subqueryResult = QueryTranslationResult.Create(subqueryCondition);
+                if (!subqueryTranslationResult.WithScripts.IsNullOrEmpty())
                 {
-                    valueQueryResult.WithScripts = new List<string>(subQueryResult.WithScripts);
-                    valueQueryResult.RecurveObjectName = subQueryResult.RecurveObjectName;
-                    valueQueryResult.RecurvePetName = subQueryResult.RecurvePetName;
+                    subqueryResult.WithScripts = new List<string>(subqueryTranslationResult.WithScripts);
+                    subqueryResult.RecurveObjectName = subqueryTranslationResult.RecurveObjectName;
+                    subqueryResult.RecurvePetName = subqueryTranslationResult.RecurvePetName;
                 }
-                return valueQueryResult;
+                return subqueryResult;
             }
-            parameters.Add(parameterName, FormatCriteriaValue(criteria.Operator, criteria.GetCriteriaRealValue()));
-            var criteriaCondition = $"{criteriaFieldName} {sqlOperator} {SqlServerFactory.ParameterPrefix}{parameterName}";
-            return TranslateResult.CreateNewResult(criteriaCondition);
+            parameters.Add(parameterName, FormatCriterionValue(criterion.Operator, criterion.Value));
+            var criterionCondition = $"{criterionFieldName} {sqlOperator} {SqlServerManager.ParameterPrefix}{parameterName}";
+            return QueryTranslationResult.Create(criterionCondition);
         }
 
         /// <summary>
         /// Get sql operator by condition operator
         /// </summary>
-        /// <param name="criteriaOperator">Criteeria operation</param>
+        /// <param name="criterionOperator">Criteeria operation</param>
         /// <returns></returns>
-        string GetOperator(CriteriaOperator criteriaOperator)
+        string GetOperator(CriterionOperator criterionOperator)
         {
             string sqlOperator = string.Empty;
-            switch (criteriaOperator)
+            switch (criterionOperator)
             {
-                case CriteriaOperator.Equal:
+                case CriterionOperator.Equal:
                     sqlOperator = EqualOperator;
                     break;
-                case CriteriaOperator.GreaterThan:
+                case CriterionOperator.GreaterThan:
                     sqlOperator = GreaterThanOperator;
                     break;
-                case CriteriaOperator.GreaterThanOrEqual:
+                case CriterionOperator.GreaterThanOrEqual:
                     sqlOperator = GreaterThanOrEqualOperator;
                     break;
-                case CriteriaOperator.NotEqual:
+                case CriterionOperator.NotEqual:
                     sqlOperator = NotEqualOperator;
                     break;
-                case CriteriaOperator.LessThan:
+                case CriterionOperator.LessThan:
                     sqlOperator = LessThanOperator;
                     break;
-                case CriteriaOperator.LessThanOrEqual:
+                case CriterionOperator.LessThanOrEqual:
                     sqlOperator = LessThanOrEqualOperator;
                     break;
-                case CriteriaOperator.In:
+                case CriterionOperator.In:
                     sqlOperator = InOperator;
                     break;
-                case CriteriaOperator.NotIn:
+                case CriterionOperator.NotIn:
                     sqlOperator = NotInOperator;
                     break;
-                case CriteriaOperator.Like:
-                case CriteriaOperator.BeginLike:
-                case CriteriaOperator.EndLike:
+                case CriterionOperator.Like:
+                case CriterionOperator.BeginLike:
+                case CriterionOperator.EndLike:
                     sqlOperator = LikeOperator;
                     break;
-                case CriteriaOperator.NotLike:
-                case CriteriaOperator.NotBeginLike:
-                case CriteriaOperator.NotEndLike:
+                case CriterionOperator.NotLike:
+                case CriterionOperator.NotBeginLike:
+                case CriterionOperator.NotEndLike:
                     sqlOperator = NotLikeOperator;
                     break;
-                case CriteriaOperator.IsNull:
+                case CriterionOperator.IsNull:
                     sqlOperator = IsNullOperator;
                     break;
-                case CriteriaOperator.NotNull:
+                case CriterionOperator.NotNull:
                     sqlOperator = NotNullOperator;
                     break;
             }
@@ -425,15 +438,15 @@ namespace EZNEW.Data.SqlServer
         /// <summary>
         /// Operator need parameter
         /// </summary>
-        /// <param name="criteriaOperator">Criteria operator</param>
+        /// <param name="criterionOperator">Criterion operator</param>
         /// <returns></returns>
-        bool OperatorNeedParameter(CriteriaOperator criteriaOperator)
+        bool OperatorNeedParameter(CriterionOperator criterionOperator)
         {
             bool needParameter = true;
-            switch (criteriaOperator)
+            switch (criterionOperator)
             {
-                case CriteriaOperator.NotNull:
-                case CriteriaOperator.IsNull:
+                case CriterionOperator.NotNull:
+                case CriterionOperator.IsNull:
                     needParameter = false;
                     break;
             }
@@ -443,24 +456,24 @@ namespace EZNEW.Data.SqlServer
         /// <summary>
         /// Format Value
         /// </summary>
-        /// <param name="criteriaOperator">Condition operator</param>
+        /// <param name="criterionOperator">Condition operator</param>
         /// <param name="value">value</param>
         /// <returns></returns>
-        dynamic FormatCriteriaValue(CriteriaOperator criteriaOperator, dynamic value)
+        dynamic FormatCriterionValue(CriterionOperator criterionOperator, dynamic value)
         {
             dynamic realValue = value;
-            switch (criteriaOperator)
+            switch (criterionOperator)
             {
-                case CriteriaOperator.Like:
-                case CriteriaOperator.NotLike:
+                case CriterionOperator.Like:
+                case CriterionOperator.NotLike:
                     realValue = $"%{value}%";
                     break;
-                case CriteriaOperator.BeginLike:
-                case CriteriaOperator.NotBeginLike:
+                case CriterionOperator.BeginLike:
+                case CriterionOperator.NotBeginLike:
                     realValue = $"{value}%";
                     break;
-                case CriteriaOperator.EndLike:
-                case CriteriaOperator.NotEndLike:
+                case CriterionOperator.EndLike:
+                case CriterionOperator.NotEndLike:
                     realValue = $"%{value}";
                     break;
             }
@@ -468,43 +481,50 @@ namespace EZNEW.Data.SqlServer
         }
 
         /// <summary>
-        /// Convert criteria
+        /// Convert criterion field name
         /// </summary>
+        /// <param name="query">Query object</param>
         /// <param name="objectName">Object name</param>
-        /// <param name="criteria">Criteria</param>
+        /// <param name="criterion">Criterion</param>
         /// <returns></returns>
-        string ConvertCriteriaName(IQuery query, string objectName, Criteria criteria)
+        string ConvertCriterionFieldName(IQuery query, string objectName, Criterion criterion)
         {
-            return FormatCriteriaName(query, objectName, criteria.Name, criteria.Converter);
+            return ConvertFieldName(query, objectName, criterion.Name, criterion.Options?.FieldConversionOptions);
         }
 
         /// <summary>
-        /// Convert order criteria name
+        /// Convert sort field name
         /// </summary>
+        /// <param name="query">Query object</param>
         /// <param name="objectName">Object name</param>
-        /// <param name="orderCriteria">Order criteria</param>
+        /// <param name="sortEntry">Sort entry</param>
         /// <returns></returns>
-        string ConvertOrderCriteriaName(IQuery query, string objectName, SortCriteria orderCriteria)
+        string ConvertSortFieldName(IQuery query, string objectName, SortEntry sortEntry)
         {
-            return FormatCriteriaName(query, objectName, orderCriteria.Name, orderCriteria.Converter);
+            return ConvertFieldName(query, objectName, sortEntry.Name, sortEntry.Options?.FieldConversionOptions);
         }
 
         /// <summary>
-        /// Format criteria name
+        /// Convert field name
         /// </summary>
         /// <param name="objectName">Object name</param>
         /// <param name="fieldName">Field name</param>
-        /// <param name="convert">Criteria convert</param>
-        /// <returns></returns>
-        string FormatCriteriaName(IQuery query, string objectName, string fieldName, ICriteriaConverter convert)
+        /// <param name="fieldConversionOptions">Field conversion options</param>
+        /// <returns>Return new field name</returns>
+        string ConvertFieldName(IQuery query, string objectName, string fieldName, FieldConversionOptions fieldConversionOptions)
         {
-            var field = DataManager.GetField(DatabaseServerType.SQLServer, query, fieldName);
+            var field = DataManager.GetField(DatabaseServerType, query, fieldName);
             fieldName = field.FieldName;
-            if (convert == null)
+            if (fieldConversionOptions == null)
             {
-                return $"{objectName}.{SqlServerFactory.WrapKeyword(fieldName)}";
+                return $"{objectName}.{SqlServerManager.WrapKeyword(fieldName)}";
             }
-            return SqlServerFactory.ParseCriteriaConverter(convert, objectName, fieldName);
+            var fieldConversionResult = SqlServerManager.ConvertField(DatabaseServer, fieldConversionOptions, objectName, fieldName);
+            if (string.IsNullOrWhiteSpace(fieldConversionResult?.NewFieldName))
+            {
+                throw new EZNEWException($"{DatabaseServerType}-{fieldConversionOptions.ConversionName}:new field name is null or empty.");
+            }
+            return fieldConversionResult.NewFieldName;
         }
 
         /// <summary>
@@ -520,18 +540,20 @@ namespace EZNEW.Data.SqlServer
         /// <summary>
         /// Get join condition
         /// </summary>
-        /// <param name="sourceQuery">source query</param>
-        /// <param name="joinItem">join item</param>
-        /// <returns></returns>
-        string GetJoinCondition(IQuery sourceQuery, JoinItem joinItem, string sourceObjShortName, string targetObjShortName)
+        /// <param name="sourceQuery">Source query</param>
+        /// <param name="joinEntry">Join entry</param>
+        /// <param name="sourceObjectPetName">Source object pet name</param>
+        /// <param name="targetObjectPetName">Target object pet name</param>
+        /// <returns>Return join condition</returns>
+        string GetJoinCondition(IQuery sourceQuery, JoinEntry joinEntry, string sourceObjectPetName, string targetObjectPetName)
         {
-            if (joinItem.JoinType == JoinType.CrossJoin)
+            if (joinEntry.JoinType == JoinType.CrossJoin)
             {
                 return string.Empty;
             }
-            var joinFields = joinItem?.JoinFields.Where(r => !string.IsNullOrWhiteSpace(r.Key) && !string.IsNullOrWhiteSpace(r.Value));
+            var joinFields = joinEntry?.JoinFields.Where(r => !string.IsNullOrWhiteSpace(r.Key) && !string.IsNullOrWhiteSpace(r.Value));
             var sourceEntityType = sourceQuery.GetEntityType();
-            var targetEntityType = joinItem.JoinQuery.GetEntityType();
+            var targetEntityType = joinEntry.JoinQuery.GetEntityType();
             bool useValueAsSource = false;
             if (joinFields.IsNullOrEmpty())
             {
@@ -565,9 +587,9 @@ namespace EZNEW.Data.SqlServer
                 {
                     continue;
                 }
-                var sourceField = DataManager.GetField(DatabaseServerType.SQLServer, sourceEntityType, joinField.Key);
-                var targetField = DataManager.GetField(DatabaseServerType.SQLServer, targetEntityType, joinField.Value);
-                joinList.Add($" {sourceObjShortName}.{SqlServerFactory.WrapKeyword(useValueAsSource ? targetField.FieldName : sourceField.FieldName)}{GetJoinOperator(joinItem.Operator)}{targetObjShortName}.{SqlServerFactory.WrapKeyword(useValueAsSource ? sourceField.FieldName : targetField.FieldName)}");
+                var sourceField = DataManager.GetField(DatabaseServerType, sourceEntityType, joinField.Key);
+                var targetField = DataManager.GetField(DatabaseServerType, targetEntityType, joinField.Value);
+                joinList.Add($" {sourceObjectPetName}.{SqlServerManager.WrapKeyword(useValueAsSource ? targetField.FieldName : sourceField.FieldName)}{GetJoinOperator(joinEntry.Operator)}{targetObjectPetName}.{SqlServerManager.WrapKeyword(useValueAsSource ? sourceField.FieldName : targetField.FieldName)}");
             }
             return joinList.IsNullOrEmpty() ? string.Empty : " ON" + string.Join(" AND", joinList);
         }
@@ -651,7 +673,7 @@ namespace EZNEW.Data.SqlServer
         }
 
         /// <summary>
-        /// Init
+        /// Init translator
         /// </summary>
         void Init()
         {
