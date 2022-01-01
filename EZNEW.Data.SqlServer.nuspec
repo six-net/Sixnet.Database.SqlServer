@@ -15,7 +15,7 @@
     <tags>.NET,EZNEW,SQL Serever</tags>
     <dependencies>
       <group targetFramework=".NETStandard2.0">
-        <dependency id="System.Data.SqlClient" version="4.8.1" />
+        <dependency id="System.Data.SqlClient" version="4.8.3" />
         <dependency id="EZNEW" version="4.0.0" />
       </group>
     </dependencies>
