@@ -16,7 +16,7 @@
     <dependencies>
       <group targetFramework=".NETStandard2.0">
         <dependency id="System.Data.SqlClient" version="4.8.3" />
-        <dependency id="EZNEW" version="4.0.0" />
+        <dependency id="EZNEW" version="3.5.0" />
       </group>
     </dependencies>
   </metadata>
