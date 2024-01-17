@@ -1,9 +1,8 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Data.SqlClient;
-using System.Text;
+using Sixnet.Development.Data.Database;
 
-namespace EZNEW.Data.SqlServer
+namespace Sixnet.Database.SqlServer
 {
     /// <summary>
     /// SqlServer bulk insert options
