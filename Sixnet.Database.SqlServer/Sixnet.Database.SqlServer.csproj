@@ -1,14 +1,16 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <TargetFramework>netstandard2.1</TargetFramework>
-    <SignAssembly>true</SignAssembly>
-    <AssemblyOriginatorKeyFile>sixnet.snk</AssemblyOriginatorKeyFile>
-  </PropertyGroup>
+	<PropertyGroup>
+		<TargetFramework>netstandard2.1</TargetFramework>
+		<SignAssembly>true</SignAssembly>
+		<AssemblyOriginatorKeyFile>sixnet.snk</AssemblyOriginatorKeyFile>
+		<Authors>DingBin.Li</Authors>
+		<Copyright>Copyright © DingBin.Li</Copyright>
+	</PropertyGroup>
 
-  <ItemGroup>
-    <PackageReference Include="Sixnet" Version="2.0.0" />
-    <PackageReference Include="System.Data.SqlClient" Version="4.8.2" />
-  </ItemGroup>
+	<ItemGroup>
+		<PackageReference Include="Sixnet" Version="2.0.0" />
+		<PackageReference Include="System.Data.SqlClient" Version="4.8.2" />
+	</ItemGroup>
 
 </Project>
