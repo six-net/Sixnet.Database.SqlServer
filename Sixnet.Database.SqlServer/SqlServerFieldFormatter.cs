@@ -6,11 +6,11 @@ namespace Sixnet.Database.SqlServer
     /// <summary>
     /// Default field formatter for sqlserver
     /// </summary>
-    public class SqlServerFieldFormatter : IFieldFormatter
+    public class SqlServerFieldFormatter : ISixnetFieldFormatter
     {
-        public string Format(FieldFormatContext context)
+        public string Format(FormatFieldContext context)
         {
-            var formatOption = context.FormatOption;
+            var formatOption = context.FormatSetting;
             var formatedFieldName = context.FieldName;
             formatedFieldName = formatOption.Name switch
             {

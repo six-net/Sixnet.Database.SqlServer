@@ -44,9 +44,9 @@ namespace Sixnet.Database.SqlServer
         /// </summary>
         /// <param name="server">Database server</param>
         /// <returns>Return database connection</returns>
-        internal static IDbConnection GetConnection(DatabaseServer server)
+        internal static IDbConnection GetConnection(SixnetDatabaseServer server)
         {
-            return DataManager.GetDatabaseConnection(server) ?? new SqlConnection(server.ConnectionString);
+            return SixnetDataManager.GetDatabaseConnection(server) ?? new SqlConnection(server.ConnectionString);
         }
 
         #endregion

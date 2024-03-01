@@ -7,7 +7,7 @@ namespace Sixnet.Database.SqlServer
     /// <summary>
     /// SqlServer bulk insert options
     /// </summary>
-    public class SqlServerBulkInsertOptions : IBulkInsertionOptions
+    public class SqlServerBulkInsertOptions : ISixnetBulkInsertionOptions
     {
         /// <summary>
         //  Returns a collection of System.Data.SqlClient.SqlBulkCopyColumnMapping items.

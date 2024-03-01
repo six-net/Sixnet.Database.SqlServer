@@ -13,7 +13,7 @@ namespace Sixnet.Database.SqlServer
     /// <summary>
     /// Imeplements database provider for sqlserver
     /// </summary>
-    public class SqlServerProvider : BaseDatabaseProvider
+    public class SqlServerProvider : BaseSixnetDatabaseProvider
     {
         #region Constructor
 
@@ -31,7 +31,7 @@ namespace Sixnet.Database.SqlServer
         /// </summary>
         /// <param name="server">Database server</param>
         /// <returns></returns>
-        public override IDbConnection GetDbConnection(DatabaseServer server)
+        public override IDbConnection GetDbConnection(SixnetDatabaseServer server)
         {
             return SqlServerManager.GetConnection(server);
         }
@@ -44,7 +44,7 @@ namespace Sixnet.Database.SqlServer
         /// Get data command resolver
         /// </summary>
         /// <returns></returns>
-        protected override IDataCommandResolver GetDataCommandResolver()
+        protected override ISixnetDataCommandResolver GetDataCommandResolver()
         {
             return SqlServerManager.GetCommandResolver();
         }
@@ -71,7 +71,7 @@ namespace Sixnet.Database.SqlServer
         /// Bulk insert datas
         /// </summary>
         /// <param name="command">Database bulk insert command</param>
-        public override async Task BulkInsertAsync(DatabaseBulkInsertCommand command)
+        public override async Task BulkInsertAsync(BulkInsertDatabaseCommand command)
         {
             SixnetException.ThrowIf(command?.DataTable == null, "Not set datatable");
             var bulkInsertOptions = command.BulkInsertionOptions;
@@ -110,7 +110,7 @@ namespace Sixnet.Database.SqlServer
         /// Bulk insert datas
         /// </summary>
         /// <param name="command">Database bulk insert command</param>
-        public override void BulkInsert(DatabaseBulkInsertCommand command)
+        public override void BulkInsert(BulkInsertDatabaseCommand command)
         {
             SixnetException.ThrowIf(command?.DataTable == null, "Not set datatable");
             var bulkInsertOptions = command.BulkInsertionOptions;
