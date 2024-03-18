@@ -10,7 +10,7 @@
 
 	<ItemGroup>
 		<PackageReference Include="Sixnet" Version="2.0.0" />
-		<PackageReference Include="System.Data.SqlClient" Version="4.8.2" />
+		<PackageReference Include="System.Data.SqlClient" Version="4.8.6" />
 	</ItemGroup>
 
 </Project>

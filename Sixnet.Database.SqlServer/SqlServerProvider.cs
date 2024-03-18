@@ -13,7 +13,7 @@ namespace Sixnet.Database.SqlServer
     /// <summary>
     /// Imeplements database provider for sqlserver
     /// </summary>
-    public class SqlServerProvider : BaseSixnetDatabaseProvider
+    public class SqlServerProvider : BaseDatabaseProvider
     {
         #region Constructor
 
@@ -31,7 +31,7 @@ namespace Sixnet.Database.SqlServer
         /// </summary>
         /// <param name="server">Database server</param>
         /// <returns></returns>
-        public override IDbConnection GetDbConnection(SixnetDatabaseServer server)
+        public override IDbConnection GetDbConnection(DatabaseServer server)
         {
             return SqlServerManager.GetConnection(server);
         }

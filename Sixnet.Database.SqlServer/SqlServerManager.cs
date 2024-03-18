@@ -18,7 +18,7 @@ namespace Sixnet.Database.SqlServer
         /// <summary>
         /// Gets current database server type
         /// </summary>
-        internal const DatabaseServerType CurrentDatabaseServerType = DatabaseServerType.SQLServer;
+        internal const DatabaseType CurrentDatabaseServerType = DatabaseType.SQLServer;
 
         /// <summary>
         /// Key word prefix
@@ -44,7 +44,7 @@ namespace Sixnet.Database.SqlServer
         /// </summary>
         /// <param name="server">Database server</param>
         /// <returns>Return database connection</returns>
-        internal static IDbConnection GetConnection(SixnetDatabaseServer server)
+        internal static IDbConnection GetConnection(DatabaseServer server)
         {
             return SixnetDataManager.GetDatabaseConnection(server) ?? new SqlConnection(server.ConnectionString);
         }
