@@ -139,8 +139,8 @@ namespace Sixnet.Database.SqlServer
                             break;
                         case QueryableOutputType.Predicate:
                             sqlStatement = hasCombine
-                                ? $"{preScript}SELECT 1 WHEN EXISTS(({sqlStatement}){combine})"
-                                : $"{preScript}SELECT 1 WHEN EXISTS({sqlStatement})";
+                                ? $"{preScript}SELECT 1 WHERE EXISTS(({sqlStatement}){combine})"
+                                : $"{preScript}SELECT 1 WHERE EXISTS({sqlStatement})";
                             break;
                         default:
                             sqlStatement = hasCombine
