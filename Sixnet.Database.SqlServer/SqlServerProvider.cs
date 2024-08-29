@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Data;
 using System.Data.SqlClient;
 using System.Linq;
@@ -76,33 +77,40 @@ namespace Sixnet.Database.SqlServer
             SixnetException.ThrowIf(command?.DataTable == null, "Not set datatable");
             var bulkInsertOptions = command.BulkInsertionOptions;
             var dbConnection = command.Connection.DbConnection as SqlConnection;
-            using (var sqlServerBulkCopy = new SqlBulkCopy(dbConnection, SqlBulkCopyOptions.Default, command.Connection.Transaction.DbTransaction as SqlTransaction))
+            try
             {
-                if (bulkInsertOptions is SqlServerBulkInsertOptions sqlServerBulkInsertOptions)
+                using (var sqlServerBulkCopy = new SqlBulkCopy(dbConnection, SqlBulkCopyOptions.Default, command.Connection.Transaction.DbTransaction as SqlTransaction))
                 {
-                    if (!sqlServerBulkInsertOptions.ColumnMappings.IsNullOrEmpty())
+                    if (bulkInsertOptions is SqlServerBulkInsertOptions sqlServerBulkInsertOptions)
                     {
-                        sqlServerBulkInsertOptions.ColumnMappings.ForEach(c =>
+                        if (!sqlServerBulkInsertOptions.ColumnMappings.IsNullOrEmpty())
                         {
-                            sqlServerBulkCopy.ColumnMappings.Add(c);
-                        });
+                            sqlServerBulkInsertOptions.ColumnMappings.ForEach(c =>
+                            {
+                                sqlServerBulkCopy.ColumnMappings.Add(c);
+                            });
+                        }
+                        if (sqlServerBulkInsertOptions.BulkCopyTimeout > 0)
+                        {
+                            sqlServerBulkCopy.BulkCopyTimeout = sqlServerBulkInsertOptions.BulkCopyTimeout;
+                        }
+                        if (sqlServerBulkInsertOptions.BatchSize > 0)
+                        {
+                            sqlServerBulkCopy.BatchSize = sqlServerBulkInsertOptions.BatchSize;
+                        }
                     }
-                    if (sqlServerBulkInsertOptions.BulkCopyTimeout > 0)
+                    if (sqlServerBulkCopy.ColumnMappings.Count < 1)
                     {
-                        sqlServerBulkCopy.BulkCopyTimeout = sqlServerBulkInsertOptions.BulkCopyTimeout;
+                        BuildColumnMapping(sqlServerBulkCopy, command.DataTable);
                     }
-                    if (sqlServerBulkInsertOptions.BatchSize > 0)
-                    {
-                        sqlServerBulkCopy.BatchSize = sqlServerBulkInsertOptions.BatchSize;
-                    }
+                    sqlServerBulkCopy.DestinationTableName = command.DataTable.TableName;
+                    await sqlServerBulkCopy.WriteToServerAsync(command.DataTable).ConfigureAwait(false);
+                    sqlServerBulkCopy.Close();
                 }
-                if (sqlServerBulkCopy.ColumnMappings.Count < 1)
-                {
-                    BuildColumnMapping(sqlServerBulkCopy, command.DataTable);
-                }
-                sqlServerBulkCopy.DestinationTableName = command.DataTable.TableName;
-                await sqlServerBulkCopy.WriteToServerAsync(command.DataTable).ConfigureAwait(false);
-                sqlServerBulkCopy.Close();
+            }
+            catch (Exception ex)
+            {
+                throw GetSqlException(ex);
             }
         }
 
@@ -115,33 +123,40 @@ namespace Sixnet.Database.SqlServer
             SixnetException.ThrowIf(command?.DataTable == null, "Not set datatable");
             var bulkInsertOptions = command.BulkInsertionOptions;
             var dbConnection = command.Connection.DbConnection as SqlConnection;
-            using (var sqlServerBulkCopy = new SqlBulkCopy(dbConnection, SqlBulkCopyOptions.Default, command.Connection.Transaction.DbTransaction as SqlTransaction))
+            try
             {
-                if (bulkInsertOptions is SqlServerBulkInsertOptions sqlServerBulkInsertOptions)
+                using (var sqlServerBulkCopy = new SqlBulkCopy(dbConnection, SqlBulkCopyOptions.Default, command.Connection.Transaction.DbTransaction as SqlTransaction))
                 {
-                    if (!sqlServerBulkInsertOptions.ColumnMappings.IsNullOrEmpty())
+                    if (bulkInsertOptions is SqlServerBulkInsertOptions sqlServerBulkInsertOptions)
                     {
-                        sqlServerBulkInsertOptions.ColumnMappings.ForEach(c =>
+                        if (!sqlServerBulkInsertOptions.ColumnMappings.IsNullOrEmpty())
                         {
-                            sqlServerBulkCopy.ColumnMappings.Add(c);
-                        });
+                            sqlServerBulkInsertOptions.ColumnMappings.ForEach(c =>
+                            {
+                                sqlServerBulkCopy.ColumnMappings.Add(c);
+                            });
+                        }
+                        if (sqlServerBulkInsertOptions.BulkCopyTimeout > 0)
+                        {
+                            sqlServerBulkCopy.BulkCopyTimeout = sqlServerBulkInsertOptions.BulkCopyTimeout;
+                        }
+                        if (sqlServerBulkInsertOptions.BatchSize > 0)
+                        {
+                            sqlServerBulkCopy.BatchSize = sqlServerBulkInsertOptions.BatchSize;
+                        }
                     }
-                    if (sqlServerBulkInsertOptions.BulkCopyTimeout > 0)
+                    if (sqlServerBulkCopy.ColumnMappings.Count < 1)
                     {
-                        sqlServerBulkCopy.BulkCopyTimeout = sqlServerBulkInsertOptions.BulkCopyTimeout;
+                        BuildColumnMapping(sqlServerBulkCopy, command.DataTable);
                     }
-                    if (sqlServerBulkInsertOptions.BatchSize > 0)
-                    {
-                        sqlServerBulkCopy.BatchSize = sqlServerBulkInsertOptions.BatchSize;
-                    }
+                    sqlServerBulkCopy.DestinationTableName = command.DataTable.TableName;
+                    sqlServerBulkCopy.WriteToServer(command.DataTable);
+                    sqlServerBulkCopy.Close();
                 }
-                if (sqlServerBulkCopy.ColumnMappings.Count < 1)
-                {
-                    BuildColumnMapping(sqlServerBulkCopy, command.DataTable);
-                }
-                sqlServerBulkCopy.DestinationTableName = command.DataTable.TableName;
-                sqlServerBulkCopy.WriteToServer(command.DataTable);
-                sqlServerBulkCopy.Close();
+            }
+            catch (Exception ex)
+            {
+                throw GetSqlException(ex);
             }
         }
 
@@ -160,6 +175,24 @@ namespace Sixnet.Database.SqlServer
                     DestinationColumn = column.ColumnName
                 });
             }
+        }
+
+        #endregion
+
+        #region Get exception
+
+        protected override Exception GetSqlException(Exception ex)
+        {
+            if (ex is SqlException sqlException)
+            {
+                switch (sqlException.Number)
+                {
+                    case 2627: // Unique constraint
+                    case 2601: // Unique index
+                        return new SixnetSqlAlreadExistsException(sqlException.Message, sqlException);
+                }
+            }
+            return ex;
         }
 
         #endregion
