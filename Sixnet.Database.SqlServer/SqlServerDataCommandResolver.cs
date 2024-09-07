@@ -127,7 +127,7 @@ namespace Sixnet.Database.SqlServer
                     var useTop = hasLimit && limit.Contains("TOP");
 
                     //statement
-                    sqlStatement = $"SELECT{(useTop ? limit : "")}{GetDistinctString(queryable)} {outputFieldString} FROM {targetScript}{sort}{(!useTop && hasLimit ? limit : "")}";
+                    sqlStatement = $"SELECT {GetDistinctString(queryable)}{(useTop ? limit : "")}{outputFieldString} FROM {targetScript}{sort}{(!useTop && hasLimit ? limit : "")}";
                     //pre script
                     var preScript = GetPreScript(context, location);
                     switch (queryable.OutputType)
