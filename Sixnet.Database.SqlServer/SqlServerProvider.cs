@@ -76,12 +76,14 @@ namespace Sixnet.Database.SqlServer
         {
             SixnetException.ThrowIf(command?.DataTable == null, "Not set datatable");
             var bulkInsertOptions = command.BulkInsertionOptions;
+            var sqlServerBulkInsertOptions = bulkInsertOptions as SqlServerBulkInsertOptions;
             var dbConnection = command.Connection.DbConnection as SqlConnection;
             try
             {
-                using (var sqlServerBulkCopy = new SqlBulkCopy(dbConnection, SqlBulkCopyOptions.Default, command.Connection.Transaction.DbTransaction as SqlTransaction))
+                using (var sqlServerBulkCopy = new SqlBulkCopy(dbConnection, sqlServerBulkInsertOptions?.BulkCopyOptions 
+                    ?? SqlBulkCopyOptions.Default, command.Connection.Transaction.DbTransaction as SqlTransaction))
                 {
-                    if (bulkInsertOptions is SqlServerBulkInsertOptions sqlServerBulkInsertOptions)
+                    if (sqlServerBulkInsertOptions != null)
                     {
                         if (!sqlServerBulkInsertOptions.ColumnMappings.IsNullOrEmpty())
                         {
@@ -122,12 +124,14 @@ namespace Sixnet.Database.SqlServer
         {
             SixnetException.ThrowIf(command?.DataTable == null, "Not set datatable");
             var bulkInsertOptions = command.BulkInsertionOptions;
+            var sqlServerBulkInsertOptions = bulkInsertOptions as SqlServerBulkInsertOptions;
             var dbConnection = command.Connection.DbConnection as SqlConnection;
             try
             {
-                using (var sqlServerBulkCopy = new SqlBulkCopy(dbConnection, SqlBulkCopyOptions.Default, command.Connection.Transaction.DbTransaction as SqlTransaction))
+                using (var sqlServerBulkCopy = new SqlBulkCopy(dbConnection, sqlServerBulkInsertOptions?.BulkCopyOptions 
+                    ?? SqlBulkCopyOptions.Default, command.Connection.Transaction.DbTransaction as SqlTransaction))
                 {
-                    if (bulkInsertOptions is SqlServerBulkInsertOptions sqlServerBulkInsertOptions)
+                    if (sqlServerBulkInsertOptions != null)
                     {
                         if (!sqlServerBulkInsertOptions.ColumnMappings.IsNullOrEmpty())
                         {

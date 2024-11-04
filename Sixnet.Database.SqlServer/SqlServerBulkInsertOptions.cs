@@ -33,5 +33,10 @@ namespace Sixnet.Database.SqlServer
         /// Default is false
         /// </summary>
         public bool UseTransaction { get; set; }
+
+        /// <summary>
+        /// Gets or sets the bulk copy options
+        /// </summary>
+        public SqlBulkCopyOptions BulkCopyOptions { get; set; } = SqlBulkCopyOptions.Default;
     }
 }
