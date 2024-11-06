@@ -193,7 +193,7 @@ namespace Sixnet.Database.SqlServer
                     {
                         autoIncrementField = field;
                     }
-                    if (!context.DataOptions.InsertIncrementField)
+                    if (!SixnetDataManager.AllowInsertIncrementField(context.DataCommandExecutionContext.Command?.Options))
                     {
                         continue;
                     }

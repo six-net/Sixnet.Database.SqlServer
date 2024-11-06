@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using System.Data.SqlClient;
+using Sixnet.Development.Data;
 using Sixnet.Development.Data.Database;
 
 namespace Sixnet.Database.SqlServer
@@ -9,6 +10,11 @@ namespace Sixnet.Database.SqlServer
     /// </summary>
     public class SqlServerBulkInsertOptions : ISixnetBulkInsertionOptions
     {
+        /// <summary>
+        /// Gets or sets the data operation options
+        /// </summary>
+        public SixnetDataOperationOptions DataOperationOptions { get; set; }
+
         /// <summary>
         //  Returns a collection of System.Data.SqlClient.SqlBulkCopyColumnMapping items.
         //  Column mappings define the relationships between columns in the data source and
