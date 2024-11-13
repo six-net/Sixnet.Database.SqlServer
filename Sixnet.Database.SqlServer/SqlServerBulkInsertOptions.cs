@@ -11,7 +11,7 @@ namespace Sixnet.Database.SqlServer
     public class SqlServerBulkInsertOptions : ISixnetBulkInsertionOptions
     {
         /// <summary>
-        /// Gets or sets the data operation options
+        /// Gets or sets the data operation options.
         /// </summary>
         public SixnetDataOperationOptions DataOperationOptions { get; set; }
 
