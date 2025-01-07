@@ -1,57 +1,20 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Data;
-using System.Linq;
 using System.Text;
-using Sixnet.Development.Data;
 using Sixnet.Development.Data.Command;
 using Sixnet.Development.Data.Database;
 using Sixnet.Development.Data.Field;
+using Sixnet.Development.Data;
 using Sixnet.Development.Entity;
 using Sixnet.Development.Queryable;
 using Sixnet.Exceptions;
+using System.Threading.Tasks;
+using System.Linq;
 
 namespace Sixnet.Database.SqlServer
 {
-    /// <summary>
-    /// Defines data command resolver for sqlserver
-    /// </summary>
-    internal partial class SqlServerDataCommandResolver : BaseDataCommandResolver
+    internal partial class SqlServerDataCommandResolver
     {
-        #region Constructor
-
-        public SqlServerDataCommandResolver()
-        {
-            DatabaseType = DatabaseType.SQLServer;
-            DefaultFieldFormatter = new SqlServerFieldFormatter();
-            WrapKeywordFunc = SqlServerManager.WrapKeyword;
-            RecursiveKeyword = "WITH";
-            DbTypeDefaultValues = new Dictionary<DbType, string>()
-            {
-                { DbType.Byte, "0" },
-                { DbType.SByte, "0" },
-                { DbType.Int16, "0" },
-                { DbType.UInt16, "0" },
-                { DbType.Int32, "0" },
-                { DbType.UInt32, "0" },
-                { DbType.Int64, "0" },
-                { DbType.UInt64, "0" },
-                { DbType.Single, "0" },
-                { DbType.Double, "0" },
-                { DbType.Decimal, "0" },
-                { DbType.Boolean, "0" },
-                { DbType.String, "''" },
-                { DbType.StringFixedLength, "''" },
-                { DbType.Guid, "NEWID()" },
-                { DbType.DateTime, "GETDATE()" },
-                { DbType.DateTime2, "SYSDATETIME()" },
-                { DbType.DateTimeOffset, "SYSDATETIMEOFFSET()" },
-                { DbType.Time, "SYSUTCDATETIME()" }
-            };
-        }
-
-        #endregion
-
         #region Get query statement
 
         /// <summary>
@@ -61,7 +24,7 @@ namespace Sixnet.Database.SqlServer
         /// <param name="translationResult">Queryable translation result</param>
         /// <param name="location">Queryable location</param>
         /// <returns></returns>
-        protected override QueryDatabaseStatement GenerateQueryStatementCore(DataCommandResolveContext context, QueryableTranslationResult translationResult, QueryableLocation location)
+        protected override async Task<QueryDatabaseStatement> GenerateQueryStatementCoreAsync(DataCommandResolveContext context, QueryableTranslationResult translationResult, QueryableLocation location)
         {
             var queryable = translationResult.GetOriginalQueryable();
             string sqlStatement;
@@ -88,7 +51,7 @@ namespace Sixnet.Database.SqlServer
                     if (string.IsNullOrWhiteSpace(targetScript))
                     {
                         //target
-                        var targetStatement = GetFromTargetStatement(context, queryable, location, tablePetName);
+                        var targetStatement = await GetFromTargetStatementAsync(context, queryable, location, tablePetName).ConfigureAwait(false);
                         outputFields = targetStatement.OutputFields;
                         //condition
                         var condition = translationResult.GetCondition(ConditionStartKeyword);
@@ -108,7 +71,7 @@ namespace Sixnet.Database.SqlServer
                     {
                         outputFields = SixnetDataManager.GetQueryableFields(DatabaseType, queryable.GetModelType(), queryable, context.IsRootQueryable(queryable));
                     }
-                    var outputFieldString = FormatFieldsString(context, queryable, location, FieldLocation.Output, outputFields);
+                    var outputFieldString = await FormatFieldsStringAsync(context, queryable, location, FieldLocation.Output, outputFields).ConfigureAwait(false);
 
                     //sort
                     var hasOffset = queryable.SkipCount > 0;
@@ -117,7 +80,7 @@ namespace Sixnet.Database.SqlServer
                     var hasSort = !string.IsNullOrWhiteSpace(sort);
                     if (hasTakeNum && hasOffset && !hasSort)
                     {
-                        sort = GetDefaultSort(context, translationResult, queryable, outputFields, tablePetName);
+                        sort = await GetDefaultSortAsync(context, translationResult, queryable, outputFields, tablePetName).ConfigureAwait(false);
                         hasSort = !string.IsNullOrWhiteSpace(sort);
                     }
 
@@ -171,7 +134,7 @@ namespace Sixnet.Database.SqlServer
         /// </summary>
         /// <param name="context">Command resolve context</param>
         /// <returns></returns>
-        protected override List<ExecutionDatabaseStatement> GenerateInsertStatements(DataCommandResolveContext context)
+        protected override async Task<List<ExecutionDatabaseStatement>> GenerateInsertStatementsAsync(DataCommandResolveContext context)
         {
             var command = context.DataCommandExecutionContext.Command;
             var dataCommandExecutionContext = context.DataCommandExecutionContext;
@@ -202,7 +165,7 @@ namespace Sixnet.Database.SqlServer
                 insertFields.Add(WrapKeywordFunc(field.GetFieldName(DatabaseType)));
                 // values
                 var insertValue = command.FieldsAssignment.GetNewValue(field.PropertyName);
-                insertValues.Add(FormatInsertValueField(context, command.Queryable, insertValue));
+                insertValues.Add(await FormatInsertValueFieldAsync(context, command.Queryable, insertValue).ConfigureAwait(false));
 
                 // split value
                 if (field.InRole(FieldRole.SplitValue))
@@ -218,7 +181,7 @@ namespace Sixnet.Database.SqlServer
             {
                 dataCommandExecutionContext.SetSplitValues(new List<dynamic>(1) { splitValue });
             }
-            var tableNames = dataCommandExecutionContext.GetTableNames();
+            var tableNames = await dataCommandExecutionContext.GetTableNamesAsync().ConfigureAwait(false);
 
             SixnetDirectThrower.ThrowInvalidOperationIf(tableNames.IsNullOrEmpty(), $"Get table name failed for {entityType.Name}");
             SixnetDirectThrower.ThrowInvalidOperationIf(tableNames.Count > 1 && autoIncrementField != null, $"Not support auto increment field for multiple tables");
@@ -259,14 +222,14 @@ namespace Sixnet.Database.SqlServer
         /// </summary>
         /// <param name="context">Command resolve context</param>
         /// <returns></returns>
-        protected override List<ExecutionDatabaseStatement> GenerateUpdateStatements(DataCommandResolveContext context)
+        protected override async Task<List<ExecutionDatabaseStatement>> GenerateUpdateStatementsAsync(DataCommandResolveContext context)
         {
             var command = context.DataCommandExecutionContext.Command;
             SixnetException.ThrowIf(command?.FieldsAssignment?.NewValues.IsNullOrEmpty() ?? true, "No set update field");
 
             #region translate
 
-            var translationResult = Translate(context);
+            var translationResult = await TranslateAsync(context).ConfigureAwait(false);
             var preScripts = context.GetPreScripts();
 
             #endregion
@@ -276,7 +239,7 @@ namespace Sixnet.Database.SqlServer
             var dataCommandExecutionContext = context.DataCommandExecutionContext;
             var entityType = dataCommandExecutionContext.Command.GetEntityType();
 
-            var tableNames = dataCommandExecutionContext.GetTableNames(command);
+            var tableNames = await dataCommandExecutionContext.GetTableNamesAsync(command).ConfigureAwait(false);
             SixnetDirectThrower.ThrowInvalidOperationIf(tableNames.IsNullOrEmpty(), $"Get table name failed for {entityType.Name}");
 
             var tablePetName = command.Queryable == null ? context.GetNewTablePetName() : context.GetDefaultTablePetName(command.Queryable);
@@ -291,7 +254,7 @@ namespace Sixnet.Database.SqlServer
                 SixnetDirectThrower.ThrowSixnetExceptionIf(updateField == null, $"Not found field:{propertyName}");
 
                 var fieldFormattedName = WrapKeywordFunc(updateField.GetFieldName(DatabaseType));
-                var newValueExpression = FormatUpdateValueField(context, command, newValue);
+                var newValueExpression = await FormatUpdateValueFieldAsync(context, command, newValue).ConfigureAwait(false);
                 updateSetArray.Add($"{tablePetName}.{fieldFormattedName}={newValueExpression}");
             }
 
@@ -326,7 +289,7 @@ namespace Sixnet.Database.SqlServer
             }
             else
             {
-                var queryStatement = GenerateQueryStatementCore(context, translationResult, QueryableLocation.JoinTarget);
+                var queryStatement = await GenerateQueryStatementCoreAsync(context, translationResult, QueryableLocation.JoinTarget).ConfigureAwait(false);
                 var updateTablePetName = "UTB";
                 var joinItems = FormatWrapJoinPrimaryKeys(context, command.Queryable, command.GetEntityType(), tablePetName, tablePetName, updateTablePetName);
                 scriptTemplate = $"{FormatPreScript(context)}UPDATE {tablePetName} SET {string.Join(",", updateSetArray)} FROM {{0}}{TablePetNameKeyword}{tablePetName} INNER JOIN ({queryStatement.Script}){TablePetNameKeyword}{updateTablePetName} ON {string.Join(" AND ", joinItems)};";
@@ -358,14 +321,14 @@ namespace Sixnet.Database.SqlServer
         /// </summary>
         /// <param name="context">Command resolve context</param>
         /// <returns></returns>
-        protected override List<ExecutionDatabaseStatement> GenerateDeleteStatements(DataCommandResolveContext context)
+        protected override async Task<List<ExecutionDatabaseStatement>> GenerateDeleteStatementsAsync(DataCommandResolveContext context)
         {
             var dataCommandExecutionContext = context.DataCommandExecutionContext;
             var command = dataCommandExecutionContext.Command;
 
             #region translate
 
-            var translationResult = Translate(context);
+            var translationResult = await TranslateAsync(context).ConfigureAwait(false);
             var preScripts = context.GetPreScripts();
 
             #endregion
@@ -374,7 +337,7 @@ namespace Sixnet.Database.SqlServer
 
             var tablePetName = command.Queryable == null ? context.GetNewTablePetName() : context.GetDefaultTablePetName(command.Queryable);
             var entityType = dataCommandExecutionContext.Command.GetEntityType();
-            var tableNames = dataCommandExecutionContext.GetTableNames(command);
+            var tableNames = await dataCommandExecutionContext.GetTableNamesAsync(command).ConfigureAwait(false);
             SixnetDirectThrower.ThrowInvalidOperationIf(tableNames.IsNullOrEmpty(), $"Get table name failed for {entityType.Name}");
 
             // parameters
@@ -408,7 +371,7 @@ namespace Sixnet.Database.SqlServer
             }
             else
             {
-                var queryStatement = GenerateQueryStatementCore(context, translationResult, QueryableLocation.JoinTarget);
+                var queryStatement = await GenerateQueryStatementCoreAsync(context, translationResult, QueryableLocation.JoinTarget).ConfigureAwait(false);
                 var updateTablePetName = "UTB";
                 var joinItems = FormatWrapJoinPrimaryKeys(context, command.Queryable, command.GetEntityType(), tablePetName, tablePetName, updateTablePetName);
                 scriptTemplate = $"{FormatPreScript(context)}DELETE {tablePetName} FROM {{0}}{TablePetNameKeyword}{tablePetName} INNER JOIN ({queryStatement.Script}){TablePetNameKeyword}{updateTablePetName} ON {string.Join(" AND ", joinItems)};";
@@ -439,7 +402,7 @@ namespace Sixnet.Database.SqlServer
         /// </summary>
         /// <param name="migrationCommand">Migration command</param>
         /// <returns></returns>
-        protected override List<ExecutionDatabaseStatement> GetCreateTableStatements(MigrationDatabaseCommand migrationCommand)
+        protected override async Task<List<ExecutionDatabaseStatement>> GetCreateTableStatementsAsync(MigrationDatabaseCommand migrationCommand)
         {
             var migrationInfo = migrationCommand.MigrationInfo;
             if (migrationInfo?.NewTables.IsNullOrEmpty() ?? true)
@@ -486,138 +449,26 @@ namespace Sixnet.Database.SqlServer
                     LogExecutionStatement(createTableStatement);
                 }
             }
-            return statements;
+            return await Task.FromResult(statements).ConfigureAwait(false);
         }
 
         #endregion
 
-        #region Get limit string
+        #region Get default sort
 
-        /// <summary>
-        /// Get limit string
-        /// </summary>
-        /// <param name="offsetNum">Offset num</param>
-        /// <param name="takeNum">Take num</param>
-        /// <param name="hasSort">Has sort</param>
-        /// <returns></returns>
-        protected override string GetLimitString(int offsetNum, int takeNum, bool hasSort)
+        protected override async Task<string> GetDefaultSortAsync(DataCommandResolveContext context, QueryableTranslationResult translationResult, ISixnetQueryable originalQueryable, IEnumerable<ISixnetField> dataFields, string tablePetName)
         {
-            if (takeNum < 1)
+            var defaultSortField = dataFields?.Where(f => f is DataField)
+                                              .OrderByDescending(f => f.InRole(FieldRole.Sequence))
+                                              .ThenByDescending(f => f.InRole(FieldRole.PrimaryKey))
+                                              .FirstOrDefault();
+            if (defaultSortField != null)
             {
-                return string.Empty;
+                var orderField = DataField.Create(defaultSortField.PropertyName, originalQueryable.GetModelType());
+                originalQueryable.OrderBy(orderField);
+                await AppendSortAsync(context, originalQueryable, translationResult, true).ConfigureAwait(false);
             }
-            if (offsetNum < 1 && !hasSort)
-            {
-                return $" TOP({takeNum}) ";
-            }
-            return $" OFFSET {offsetNum} ROWS FETCH NEXT {takeNum} ROWS ONLY";
-
-        }
-
-        #endregion
-
-        #region Get field sql data type
-
-        /// <summary>
-        /// Get sql data type
-        /// </summary>
-        /// <param name="field">Field</param>
-        /// <returns></returns>
-        protected override string GetSqlDataType(DataField field, MigrationInfo options)
-        {
-            SixnetDirectThrower.ThrowArgNullIf(field == null, nameof(field));
-            var dbTypeName = "";
-            if (!string.IsNullOrWhiteSpace(field.DbType))
-            {
-                dbTypeName = field.DbType;
-            }
-            else
-            {
-                var dbType = field.GetDataType().GetDbType();
-                var length = field.Length;
-                var precision = field.Precision;
-                var notFixedLength = options.NotFixedLength || field.HasDbFeature(FieldDbFeature.NotFixedLength);
-                static int getCharLength(int flength, int defLength) => flength < 1 ? defLength : flength;
-                switch (dbType)
-                {
-                    case DbType.AnsiString:
-                        dbTypeName = $"VARCHAR({getCharLength(length, DefaultCharLength)})";
-                        break;
-                    case DbType.AnsiStringFixedLength:
-                        dbTypeName = $"CHAR({getCharLength(length, DefaultCharLength)})";
-                        break;
-                    case DbType.Binary:
-                        dbTypeName = $"VARBINARY({getCharLength(length, DefaultCharLength)})";
-                        break;
-                    case DbType.Boolean:
-                        dbTypeName = "BIT";
-                        break;
-                    case DbType.Byte:
-                        dbTypeName = "TINYINT";
-                        break;
-                    case DbType.Currency:
-                        dbTypeName = "MONEY";
-                        break;
-                    case DbType.Date:
-                        dbTypeName = "DATE";
-                        break;
-                    case DbType.DateTime:
-                        dbTypeName = "DATETIME";
-                        break;
-                    case DbType.DateTime2:
-                        dbTypeName = $"DATETIME2({(length < 1 ? 7 : length)})";
-                        break;
-                    case DbType.DateTimeOffset:
-                        dbTypeName = $"DATETIMEOFFSET({(length < 1 ? 7 : length)})";
-                        break;
-                    case DbType.Decimal:
-                        dbTypeName = $"DECIMAL({(length < 1 ? DefaultDecimalLength : length)}, {(precision < 0 ? DefaultDecimalPrecision : precision)})";
-                        break;
-                    case DbType.Double:
-                        dbTypeName = "FLOAT";
-                        break;
-                    case DbType.Guid:
-                        dbTypeName = "UNIQUEIDENTIFIER";
-                        break;
-                    case DbType.Int16:
-                    case DbType.SByte:
-                        dbTypeName = "SMALLINT";
-                        break;
-                    case DbType.Int32:
-                    case DbType.UInt16:
-                    case DbType.UInt32:
-                        dbTypeName = "INT";
-                        break;
-                    case DbType.Int64:
-                    case DbType.UInt64:
-                        dbTypeName = "BIGINT";
-                        break;
-                    case DbType.Object:
-                        dbTypeName = "SQL_VARIANT";
-                        break;
-                    case DbType.Single:
-                        dbTypeName = "REAL";
-                        break;
-                    case DbType.String:
-                        length = getCharLength(length, DefaultCharLength);
-                        dbTypeName = notFixedLength
-                            ? $"VARCHAR({(length > 8000 ? "MAX" : length.ToString())})"
-                            : $"NVARCHAR ({(length > 4000 ? "MAX" : length.ToString())})";
-                        break;
-                    case DbType.StringFixedLength:
-                        dbTypeName = $"NCHAR({getCharLength(length, DefaultCharLength)})";
-                        break;
-                    case DbType.Time:
-                        dbTypeName = $"TIME({(length < 1 ? 7 : length)})";
-                        break;
-                    case DbType.Xml:
-                        dbTypeName = "XML";
-                        break;
-                    default:
-                        throw new NotSupportedException(dbType.ToString());
-                }
-            }
-            return $" {dbTypeName}";
+            return translationResult.GetSort();
         }
 
         #endregion
