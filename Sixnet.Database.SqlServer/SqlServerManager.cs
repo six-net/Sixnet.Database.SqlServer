@@ -51,6 +51,15 @@ namespace Sixnet.Database.SqlServer
 
         #endregion
 
+        #region Format keyword
+
+        internal static string FormatKeyword(string originalValue)
+        {
+            return SixnetDataManager.FormatDatabaseWordAndName(CurrentDatabaseServerType, originalValue);
+        }
+
+        #endregion
+
         #region Wrap keyword
 
         /// <summary>

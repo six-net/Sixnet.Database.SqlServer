@@ -24,6 +24,7 @@ namespace Sixnet.Database.SqlServer
         {
             DatabaseType = DatabaseType.SQLServer;
             DefaultFieldFormatter = new SqlServerFieldFormatter();
+            FormatKeywordFunc = SqlServerManager.FormatKeyword;
             WrapKeywordFunc = SqlServerManager.WrapKeyword;
             RecursiveKeyword = "WITH";
             DbTypeDefaultValues = new Dictionary<DbType, string>()
@@ -134,17 +135,23 @@ namespace Sixnet.Database.SqlServer
                     {
                         case QueryableOutputType.Count:
                             sqlStatement = hasCombine
-                                ? $"{preScript}SELECT COUNT(1) FROM (({sqlStatement}){combine}){TablePetNameKeyword}{tablePetName}"
+                                ? hasSort
+                                    ? $"{preScript}SELECT COUNT(1) FROM ((SELECT {tablePetName}.* FROM ({sqlStatement}){TablePetNameKeyword}{tablePetName}){combine}){TablePetNameKeyword}{tablePetName}"
+                                    : $"{preScript}SELECT COUNT(1) FROM (({sqlStatement}){combine}){TablePetNameKeyword}{tablePetName}"
                                 : $"{preScript}SELECT COUNT(1) FROM ({sqlStatement}){TablePetNameKeyword}{tablePetName}";
                             break;
                         case QueryableOutputType.Predicate:
                             sqlStatement = hasCombine
-                                ? $"{preScript}SELECT 1 WHERE EXISTS(({sqlStatement}){combine})"
+                                ? hasSort
+                                    ? $"{preScript}SELECT 1 WHERE EXISTS((SELECT {tablePetName}.* FROM ({sqlStatement}){TablePetNameKeyword}{tablePetName}){combine})"
+                                    : $"{preScript}SELECT 1 WHERE EXISTS(({sqlStatement}){combine})"
                                 : $"{preScript}SELECT 1 WHERE EXISTS({sqlStatement})";
                             break;
                         default:
                             sqlStatement = hasCombine
-                            ? $"{preScript}({sqlStatement}){combine}"
+                            ? hasSort
+                                ? $"{preScript}(SELECT {tablePetName}.* FROM ({sqlStatement}){TablePetNameKeyword}{tablePetName}){combine}"
+                                : $"{preScript}({sqlStatement}){combine}"
                             : $"{preScript}{sqlStatement}";
                             break;
                     }
@@ -193,13 +200,13 @@ namespace Sixnet.Database.SqlServer
                     {
                         autoIncrementField = field;
                     }
-                    if (!SixnetDataManager.AllowInsertIncrementField(context.DataCommandExecutionContext.Command?.Options))
+                    if (!SixnetDataManager.AllowInsertIncrementField(context.DataCommandExecutionContext))
                     {
                         continue;
                     }
                 }
                 // fields
-                insertFields.Add(WrapKeywordFunc(field.GetFieldName(DatabaseType)));
+                insertFields.Add(FormatAndWrapKeywordFunc(field.GetFieldName(DatabaseType)));
                 // values
                 var insertValue = command.FieldsAssignment.GetNewValue(field.PropertyName);
                 insertValues.Add(FormatInsertValueField(context, command.Queryable, insertValue));
@@ -228,7 +235,7 @@ namespace Sixnet.Database.SqlServer
             var scriptTemplate = $"INSERT INTO {{0}} ({string.Join(",", insertFields)}) VALUES ({string.Join(",", insertValues)});";
             foreach (var tableName in tableNames)
             {
-                statementBuilder.AppendLine(string.Format(scriptTemplate, WrapKeywordFunc(tableName)));
+                statementBuilder.AppendLine(string.Format(scriptTemplate, FormatAndWrapKeywordFunc(tableName)));
             }
             if (autoIncrementField != null)
             {
@@ -290,7 +297,7 @@ namespace Sixnet.Database.SqlServer
 
                 SixnetDirectThrower.ThrowSixnetExceptionIf(updateField == null, $"Not found field:{propertyName}");
 
-                var fieldFormattedName = WrapKeywordFunc(updateField.GetFieldName(DatabaseType));
+                var fieldFormattedName = FormatAndWrapKeywordFunc(updateField.GetFieldName(DatabaseType));
                 var newValueExpression = FormatUpdateValueField(context, command, newValue);
                 updateSetArray.Add($"{tablePetName}.{fieldFormattedName}={newValueExpression}");
             }
@@ -310,7 +317,7 @@ namespace Sixnet.Database.SqlServer
                 var statementBuilder = new StringBuilder();
                 foreach (var tableName in tableNames)
                 {
-                    statementBuilder.AppendLine(string.Format(scriptTemplate, WrapKeywordFunc(tableName)));
+                    statementBuilder.AppendLine(string.Format(scriptTemplate, FormatAndWrapKeywordFunc(tableName)));
                 }
                 return new List<ExecutionDatabaseStatement>(1)
                 {
@@ -335,7 +342,7 @@ namespace Sixnet.Database.SqlServer
                 {
                     statements.Add(new ExecutionDatabaseStatement()
                     {
-                        Script = string.Format(scriptTemplate, WrapKeywordFunc(tableName)),
+                        Script = string.Format(scriptTemplate, FormatAndWrapKeywordFunc(tableName)),
                         ScriptType = scriptType,
                         MustAffectData = command.Options?.MustAffectData ?? false,
                         Parameters = parameters,
@@ -392,7 +399,7 @@ namespace Sixnet.Database.SqlServer
                 var statementBuilder = new StringBuilder();
                 foreach (var tableName in tableNames)
                 {
-                    statementBuilder.AppendLine(string.Format(scriptTemplate, WrapKeywordFunc(tableName)));
+                    statementBuilder.AppendLine(string.Format(scriptTemplate, FormatAndWrapKeywordFunc(tableName)));
                 }
                 return new List<ExecutionDatabaseStatement>(1)
                 {
@@ -417,7 +424,7 @@ namespace Sixnet.Database.SqlServer
                 {
                     statements.Add(new ExecutionDatabaseStatement()
                     {
-                        Script = string.Format(scriptTemplate, WrapKeywordFunc(tableName)),
+                        Script = string.Format(scriptTemplate, FormatAndWrapKeywordFunc(tableName)),
                         ScriptType = scriptType,
                         MustAffectData = command.Options?.MustAffectData ?? false,
                         Parameters = parameters,
