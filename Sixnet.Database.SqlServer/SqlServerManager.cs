@@ -1,10 +1,7 @@
-﻿using System;
-using System.Data;
+﻿using System.Data;
 using System.Data.SqlClient;
 using Sixnet.Development.Data;
-using Sixnet.Development.Data.Command;
 using Sixnet.Development.Data.Database;
-using Sixnet.Logging;
 
 namespace Sixnet.Database.SqlServer
 {
@@ -46,7 +43,7 @@ namespace Sixnet.Database.SqlServer
         /// <returns>Return database connection</returns>
         internal static IDbConnection GetConnection(DatabaseServer server)
         {
-            return SixnetDataManager.GetDatabaseConnection(server) ?? new SqlConnection(server.ConnectionString);
+            return SixnetDataManager.GetDatabaseConnection(server) ?? new SqlConnection(SixnetDataManager.ResolveConnectionString(server));
         }
 
         #endregion

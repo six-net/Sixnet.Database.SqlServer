@@ -498,6 +498,24 @@ namespace Sixnet.Database.SqlServer
 
         #endregion
 
+        #region Get update field statements 
+
+        protected override List<ExecutionDatabaseStatement> GetUpdateFieldStatements(MigrationDatabaseCommand migrationCommand)
+        {
+            return new List<ExecutionDatabaseStatement>(0);
+        }
+
+        #endregion
+
+        #region Get rename table statements
+
+        protected override List<ExecutionDatabaseStatement> GetRenameTableStatements(MigrationDatabaseCommand migrationCommand)
+        {
+            return new List<ExecutionDatabaseStatement>(0);
+        }
+
+        #endregion
+
         #region Get limit string
 
         /// <summary>
