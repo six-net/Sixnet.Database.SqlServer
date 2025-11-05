@@ -19,10 +19,10 @@
     </dependencies>
   </metadata>
   <files>
-    <file src="Sixnet\bin\$configuration$\net6.0\Sixnet.dll" target="lib\net6.0" />
-	<file src="Sixnet\bin\$configuration$\net6.0\Sixnet.pdb" target="lib\net6.0" />
-    <file src="Sixnet\bin\$configuration$\net8.0\Sixnet.dll" target="lib\net8.0" />
-	<file src="Sixnet\bin\$configuration$\net8.0\Sixnet.pdb" target="lib\net8.0" />
+    <file src="Sixnet\bin\$configuration$\net6.0\Sixnet.Database.SqlServer.dll" target="lib\net6.0" />
+	<file src="Sixnet\bin\$configuration$\net6.0\Sixnet.Database.SqlServer.pdb" target="lib\net6.0" />
+    <file src="Sixnet\bin\$configuration$\net8.0\Sixnet.Database.SqlServer.dll" target="lib\net8.0" />
+	<file src="Sixnet\bin\$configuration$\net8.0\Sixnet.Database.SqlServer.pdb" target="lib\net8.0" />
 	<file src=".\nugeticon.png" target="images\" />
   </files>
 </package>
