@@ -1,10 +1,8 @@
-﻿using System;
-using System.Data;
+﻿using System.Data;
 using System.Data.SqlClient;
+
 using Sixnet.Development.Data;
-using Sixnet.Development.Data.Command;
 using Sixnet.Development.Data.Database;
-using Sixnet.Logging;
 
 namespace Sixnet.Database.SqlServer
 {
@@ -46,7 +44,16 @@ namespace Sixnet.Database.SqlServer
         /// <returns>Return database connection</returns>
         internal static IDbConnection GetConnection(DatabaseServer server)
         {
-            return SixnetDataManager.GetDatabaseConnection(server) ?? new SqlConnection(server.ConnectionString);
+            return SixnetDataManager.GetDatabaseConnection(server) ?? new SqlConnection(SixnetDataManager.ResolveConnectionString(server));
+        }
+
+        #endregion
+
+        #region Format keyword
+
+        internal static string FormatKeyword(string originalValue, DatabaseObjectNameType nameType)
+        {
+            return SixnetDataManager.FormatDatabaseWordAndName(CurrentDatabaseServerType, originalValue);
         }
 
         #endregion
@@ -58,9 +65,9 @@ namespace Sixnet.Database.SqlServer
         /// </summary>
         /// <param name="originalValue">Original value</param>
         /// <returns></returns>
-        internal static string WrapKeyword(string originalValue)
+        internal static string WrapKeyword(string originalValue, DatabaseObjectNameType nameType)
         {
-            return $"{KeywordPrefix}{originalValue}{KeywordSuffix}";
+            return nameType == DatabaseObjectNameType.ColumnName ? $"{KeywordPrefix}{originalValue}{KeywordSuffix}" : originalValue;
         }
 
         #endregion
