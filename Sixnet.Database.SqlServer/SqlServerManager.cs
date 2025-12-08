@@ -1,5 +1,6 @@
 ﻿using System.Data;
 using System.Data.SqlClient;
+
 using Sixnet.Development.Data;
 using Sixnet.Development.Data.Database;
 
@@ -50,7 +51,7 @@ namespace Sixnet.Database.SqlServer
 
         #region Format keyword
 
-        internal static string FormatKeyword(string originalValue)
+        internal static string FormatKeyword(string originalValue, DatabaseObjectNameType nameType)
         {
             return SixnetDataManager.FormatDatabaseWordAndName(CurrentDatabaseServerType, originalValue);
         }
@@ -64,9 +65,9 @@ namespace Sixnet.Database.SqlServer
         /// </summary>
         /// <param name="originalValue">Original value</param>
         /// <returns></returns>
-        internal static string WrapKeyword(string originalValue)
+        internal static string WrapKeyword(string originalValue, DatabaseObjectNameType nameType)
         {
-            return $"{KeywordPrefix}{originalValue}{KeywordSuffix}";
+            return nameType == DatabaseObjectNameType.ColumnName ? $"{KeywordPrefix}{originalValue}{KeywordSuffix}" : originalValue;
         }
 
         #endregion

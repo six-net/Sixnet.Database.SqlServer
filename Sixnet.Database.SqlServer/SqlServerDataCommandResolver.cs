@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Linq;
 using System.Text;
+
 using Sixnet.Development.Data;
 using Sixnet.Development.Data.Command;
 using Sixnet.Development.Data.Database;
@@ -206,7 +207,7 @@ namespace Sixnet.Database.SqlServer
                     }
                 }
                 // fields
-                insertFields.Add(FormatAndWrapKeywordFunc(field.GetFieldName(DatabaseType)));
+                insertFields.Add(FormatAndWrapKeywordFunc(field.GetFieldName(DatabaseType), DatabaseObjectNameType.ColumnName));
                 // values
                 var insertValue = command.FieldsAssignment.GetNewValue(field.PropertyName);
                 insertValues.Add(FormatInsertValueField(context, command.Queryable, insertValue));
@@ -235,7 +236,7 @@ namespace Sixnet.Database.SqlServer
             var scriptTemplate = $"INSERT INTO {{0}} ({string.Join(",", insertFields)}) VALUES ({string.Join(",", insertValues)});";
             foreach (var tableName in tableNames)
             {
-                statementBuilder.AppendLine(string.Format(scriptTemplate, FormatAndWrapKeywordFunc(tableName)));
+                statementBuilder.AppendLine(string.Format(scriptTemplate, FormatAndWrapKeywordFunc(tableName, DatabaseObjectNameType.TableName)));
             }
             if (autoIncrementField != null)
             {
@@ -297,7 +298,7 @@ namespace Sixnet.Database.SqlServer
 
                 SixnetDirectThrower.ThrowSixnetExceptionIf(updateField == null, $"Not found field:{propertyName}");
 
-                var fieldFormattedName = FormatAndWrapKeywordFunc(updateField.GetFieldName(DatabaseType));
+                var fieldFormattedName = FormatAndWrapKeywordFunc(updateField.GetFieldName(DatabaseType), DatabaseObjectNameType.ColumnName);
                 var newValueExpression = FormatUpdateValueField(context, command, newValue);
                 updateSetArray.Add($"{tablePetName}.{fieldFormattedName}={newValueExpression}");
             }
@@ -317,7 +318,7 @@ namespace Sixnet.Database.SqlServer
                 var statementBuilder = new StringBuilder();
                 foreach (var tableName in tableNames)
                 {
-                    statementBuilder.AppendLine(string.Format(scriptTemplate, FormatAndWrapKeywordFunc(tableName)));
+                    statementBuilder.AppendLine(string.Format(scriptTemplate, FormatAndWrapKeywordFunc(tableName, DatabaseObjectNameType.TableName)));
                 }
                 return new List<ExecutionDatabaseStatement>(1)
                 {
@@ -342,7 +343,7 @@ namespace Sixnet.Database.SqlServer
                 {
                     statements.Add(new ExecutionDatabaseStatement()
                     {
-                        Script = string.Format(scriptTemplate, FormatAndWrapKeywordFunc(tableName)),
+                        Script = string.Format(scriptTemplate, FormatAndWrapKeywordFunc(tableName, DatabaseObjectNameType.TableName)),
                         ScriptType = scriptType,
                         MustAffectData = command.Options?.MustAffectData ?? false,
                         Parameters = parameters,
@@ -399,7 +400,7 @@ namespace Sixnet.Database.SqlServer
                 var statementBuilder = new StringBuilder();
                 foreach (var tableName in tableNames)
                 {
-                    statementBuilder.AppendLine(string.Format(scriptTemplate, FormatAndWrapKeywordFunc(tableName)));
+                    statementBuilder.AppendLine(string.Format(scriptTemplate, FormatAndWrapKeywordFunc(tableName, DatabaseObjectNameType.TableName)));
                 }
                 return new List<ExecutionDatabaseStatement>(1)
                 {
@@ -424,7 +425,7 @@ namespace Sixnet.Database.SqlServer
                 {
                     statements.Add(new ExecutionDatabaseStatement()
                     {
-                        Script = string.Format(scriptTemplate, FormatAndWrapKeywordFunc(tableName)),
+                        Script = string.Format(scriptTemplate, FormatAndWrapKeywordFunc(tableName, DatabaseObjectNameType.TableName)),
                         ScriptType = scriptType,
                         MustAffectData = command.Options?.MustAffectData ?? false,
                         Parameters = parameters,
@@ -455,7 +456,6 @@ namespace Sixnet.Database.SqlServer
             }
             var newTables = migrationInfo.NewTables;
             var statements = new List<ExecutionDatabaseStatement>();
-            var options = migrationCommand.MigrationInfo;
             foreach (var newTableInfo in newTables)
             {
                 if (newTableInfo?.EntityType == null || (newTableInfo?.TableNames.IsNullOrEmpty() ?? true))
@@ -473,8 +473,8 @@ namespace Sixnet.Database.SqlServer
                     var dataField = SixnetDataManager.GetField(SqlServerManager.CurrentDatabaseServerType, entityType, field.Value);
                     if (dataField is DataField dataEntityField)
                     {
-                        var dataFieldName = SqlServerManager.WrapKeyword(dataEntityField.GetFieldName(DatabaseType));
-                        newFieldScripts.Add($"{dataFieldName}{GetSqlDataType(dataEntityField, options)}{GetFieldNullable(dataEntityField, options)}{GetSqlDefaultValue(dataEntityField, options)}");
+                        var dataFieldName = SqlServerManager.WrapKeyword(dataEntityField.GetFieldName(DatabaseType), DatabaseObjectNameType.ColumnName);
+                        newFieldScripts.Add($"{dataFieldName}{GetFieldDefinition(dataEntityField, migrationInfo)}");
                         if (dataEntityField.InRole(FieldRole.PrimaryKey))
                         {
                             primaryKeyNames.Add($"{dataFieldName} ASC");
@@ -498,11 +498,114 @@ namespace Sixnet.Database.SqlServer
 
         #endregion
 
+        #region Get add filed statements
+
+        /// <summary>
+        /// Get create field statement
+        /// </summary>
+        /// <param name="migrationCommand"></param>
+        /// <returns></returns>
+        protected override List<ExecutionDatabaseStatement> GetAddFieldStatements(MigrationDatabaseCommand migrationCommand)
+        {
+            if (migrationCommand?.MigrationInfo?.NewFields.IsNullOrEmpty() ?? true)
+            {
+                return new List<ExecutionDatabaseStatement>(0);
+            }
+
+            var statements = new List<ExecutionDatabaseStatement>();
+            foreach (var tableItem in migrationCommand.MigrationInfo.NewFields)
+            {
+                if (!tableItem.Value.IsNullOrEmpty())
+                {
+                    foreach (var field in tableItem.Value)
+                    {
+                        var dataFieldName = field.GetFieldName(DatabaseType);
+                        var newFieldStatement = new ExecutionDatabaseStatement()
+                        {
+                            Script = $"IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE [object_id]=OBJECT_ID('{tableItem.Key}') AND [name]='{dataFieldName}') BEGIN ALTER TABLE {tableItem.Key} ADD {WrapKeywordFunc(dataFieldName, DatabaseObjectNameType.ColumnName)}{GetFieldDefinition(field, migrationCommand.MigrationInfo)}; END "
+                        };
+                        statements.Add(newFieldStatement);
+                        // Log script
+                        LogExecutionStatement(newFieldStatement);
+                    }
+                }
+            }
+            return statements;
+        }
+
+        #endregion
+
+        #region Get delete filed statements
+
+        protected override List<ExecutionDatabaseStatement> GetDeleteFieldStatements(MigrationDatabaseCommand migrationCommand)
+        {
+            if (migrationCommand?.MigrationInfo?.DeletableFields.IsNullOrEmpty() ?? true)
+            {
+                return new List<ExecutionDatabaseStatement>(0);
+            }
+
+            var statements = new List<ExecutionDatabaseStatement>();
+            foreach (var tableItem in migrationCommand.MigrationInfo.DeletableFields)
+            {
+                if (!tableItem.Value.IsNullOrEmpty())
+                {
+                    foreach (var field in tableItem.Value)
+                    {
+                        var dataFieldName = field.GetFieldName(DatabaseType);
+                        var deleteStatement = new ExecutionDatabaseStatement()
+                        {
+                            Script = $"IF EXISTS (SELECT 1 FROM sys.columns WHERE [object_id]=OBJECT_ID('{tableItem.Key}') AND [name]='{dataFieldName}') BEGIN ALTER TABLE {tableItem.Key} DROP COLUMN {WrapKeywordFunc(dataFieldName, DatabaseObjectNameType.ColumnName)}; END "
+                        };
+                        statements.Add(deleteStatement);
+                        // Log script
+                        LogExecutionStatement(deleteStatement);
+                    }
+                }
+            }
+            return statements;
+        }
+
+        #endregion
+
         #region Get update field statements 
 
         protected override List<ExecutionDatabaseStatement> GetUpdateFieldStatements(MigrationDatabaseCommand migrationCommand)
         {
-            return new List<ExecutionDatabaseStatement>(0);
+            if (migrationCommand?.MigrationInfo?.UpdatableFields.IsNullOrEmpty() ?? true)
+            {
+                return new List<ExecutionDatabaseStatement>(0);
+            }
+
+            var statements = new List<ExecutionDatabaseStatement>();
+            foreach (var tableItem in migrationCommand.MigrationInfo.UpdatableFields)
+            {
+                if (tableItem.Value.IsNullOrEmpty())
+                {
+                    continue;
+                }
+                foreach (var fieldItem in tableItem.Value)
+                {
+                    var field = fieldItem.Value;
+                    var nowFieldName = fieldItem.Key;
+                    var newFieldName = field.GetFieldName(DatabaseType);
+                    var updateStatement = new ExecutionDatabaseStatement()
+                    {
+                        Script = $"IF EXISTS (SELECT 1 FROM sys.columns WHERE [object_id]=OBJECT_ID('{tableItem.Key}') AND [name]='{nowFieldName}') BEGIN ALTER TABLE {tableItem.Key} ALTER COLUMN {WrapKeywordFunc(nowFieldName, DatabaseObjectNameType.ColumnName)}{GetFieldDefinition(field, migrationCommand.MigrationInfo)}; END "
+                    };
+                    statements.Add(updateStatement);
+                    LogExecutionStatement(updateStatement);
+                    if (!string.Equals(nowFieldName, newFieldName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        var renameStatement = new ExecutionDatabaseStatement()
+                        {
+                            Script = $"IF EXISTS (SELECT 1 FROM sys.columns WHERE [object_id]=OBJECT_ID('{tableItem.Key}') AND [name]='{nowFieldName}') EXEC sp_rename '{tableItem.Key}.{nowFieldName}', {newFieldName}, 'COLUMN'; END "
+                        };
+                        statements.Add(renameStatement);
+                        LogExecutionStatement(renameStatement);
+                    }
+                }
+            }
+            return statements;
         }
 
         #endregion
@@ -511,7 +614,26 @@ namespace Sixnet.Database.SqlServer
 
         protected override List<ExecutionDatabaseStatement> GetRenameTableStatements(MigrationDatabaseCommand migrationCommand)
         {
-            return new List<ExecutionDatabaseStatement>(0);
+            var migrationInfo = migrationCommand?.MigrationInfo;
+            if (migrationInfo?.RenameTables.IsNullOrEmpty() ?? true)
+            {
+                return new List<ExecutionDatabaseStatement>(0);
+            }
+            var renameTables = migrationInfo.RenameTables;
+            var statements = new List<ExecutionDatabaseStatement>();
+            var options = migrationCommand.MigrationInfo;
+            foreach (var tableItem in renameTables)
+            {
+                var renameTableStatement = new ExecutionDatabaseStatement()
+                {
+                    Script = $"IF OBJECT_ID('{tableItem.Key}', 'U') IS NOT NULL BEGIN EXEC sp_rename 'dbo.OldTableName', 'NewTableName';\r\nEND"
+                };
+                statements.Add(renameTableStatement);
+
+                // Log script
+                LogExecutionStatement(renameTableStatement);
+            }
+            return statements;
         }
 
         #endregion
@@ -643,6 +765,37 @@ namespace Sixnet.Database.SqlServer
                 }
             }
             return $" {dbTypeName}";
+        }
+
+        #endregion
+
+        #region Get field identity
+
+        /// <summary>
+        /// Get field identity
+        /// </summary>
+        /// <param name="field">Field</param>
+        /// <param name="options">Options</param>
+        /// <returns></returns>
+        protected override string GetFieldIdentity(DataField field, MigrationInfo options)
+        {
+            SixnetDirectThrower.ThrowArgNullIf(field == null, nameof(field));
+            if (!field.InRole(FieldRole.Increment))
+            {
+                return string.Empty;
+            }
+            var startValue = field.StartValue;
+            if (startValue == 0)
+            {
+                startValue = 1;
+            }
+            var incrementValue = field.IncrementValue;
+            if (incrementValue == 0)
+            {
+                incrementValue = 1;
+            }
+
+            return $" IDENTITY({startValue}, {incrementValue})";
         }
 
         #endregion
