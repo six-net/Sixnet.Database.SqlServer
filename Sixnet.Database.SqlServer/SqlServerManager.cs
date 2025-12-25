@@ -67,7 +67,7 @@ namespace Sixnet.Database.SqlServer
         /// <returns></returns>
         internal static string WrapKeyword(string originalValue, DatabaseObjectNameType nameType)
         {
-            return nameType == DatabaseObjectNameType.ColumnName ? $"{KeywordPrefix}{originalValue}{KeywordSuffix}" : originalValue;
+            return $"{KeywordPrefix}{originalValue}{KeywordSuffix}";
         }
 
         #endregion
