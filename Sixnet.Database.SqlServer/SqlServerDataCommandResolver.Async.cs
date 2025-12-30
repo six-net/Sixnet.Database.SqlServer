@@ -168,7 +168,7 @@ namespace Sixnet.Database.SqlServer
                     }
                 }
                 // fields
-                insertFields.Add(FormatAndWrapKeywordFunc(field.GetFieldName(DatabaseType), DatabaseObjectNameType.ColumnName));
+                insertFields.Add(FormatAndWrapObjectName(field.GetFieldName(DatabaseType), DatabaseObjectType.Column));
                 // values
                 var insertValue = command.FieldsAssignment.GetNewValue(field.PropertyName);
                 insertValues.Add(await FormatInsertValueFieldAsync(context, command.Queryable, insertValue).ConfigureAwait(false));
@@ -197,7 +197,7 @@ namespace Sixnet.Database.SqlServer
             var scriptTemplate = $"INSERT INTO {{0}} ({string.Join(",", insertFields)}) VALUES ({string.Join(",", insertValues)});";
             foreach (var tableName in tableNames)
             {
-                statementBuilder.AppendLine(string.Format(scriptTemplate, FormatAndWrapKeywordFunc(tableName, DatabaseObjectNameType.TableName)));
+                statementBuilder.AppendLine(string.Format(scriptTemplate, FormatAndWrapObjectName(tableName)));
             }
             if (autoIncrementField != null)
             {
@@ -259,7 +259,7 @@ namespace Sixnet.Database.SqlServer
 
                 SixnetDirectThrower.ThrowSixnetExceptionIf(updateField == null, $"Not found field:{propertyName}");
 
-                var fieldFormattedName = FormatAndWrapKeywordFunc(updateField.GetFieldName(DatabaseType), DatabaseObjectNameType.ColumnName);
+                var fieldFormattedName = FormatAndWrapObjectName(updateField.GetFieldName(DatabaseType), DatabaseObjectType.Column);
                 var newValueExpression = await FormatUpdateValueFieldAsync(context, command, newValue).ConfigureAwait(false);
                 updateSetArray.Add($"{tablePetName}.{fieldFormattedName}={newValueExpression}");
             }
@@ -279,7 +279,7 @@ namespace Sixnet.Database.SqlServer
                 var statementBuilder = new StringBuilder();
                 foreach (var tableName in tableNames)
                 {
-                    statementBuilder.AppendLine(string.Format(scriptTemplate, FormatAndWrapKeywordFunc(tableName, DatabaseObjectNameType.TableName)));
+                    statementBuilder.AppendLine(string.Format(scriptTemplate, FormatAndWrapObjectName(tableName)));
                 }
                 return new List<ExecutionDatabaseStatement>(1)
                 {
@@ -304,7 +304,7 @@ namespace Sixnet.Database.SqlServer
                 {
                     statements.Add(new ExecutionDatabaseStatement()
                     {
-                        Script = string.Format(scriptTemplate, FormatAndWrapKeywordFunc(tableName, DatabaseObjectNameType.TableName)),
+                        Script = string.Format(scriptTemplate, FormatAndWrapObjectName(tableName)),
                         ScriptType = scriptType,
                         MustAffectData = command.Options?.MustAffectData ?? false,
                         Parameters = parameters,
@@ -361,7 +361,7 @@ namespace Sixnet.Database.SqlServer
                 var statementBuilder = new StringBuilder();
                 foreach (var tableName in tableNames)
                 {
-                    statementBuilder.AppendLine(string.Format(scriptTemplate, FormatAndWrapKeywordFunc(tableName, DatabaseObjectNameType.TableName)));
+                    statementBuilder.AppendLine(string.Format(scriptTemplate, FormatAndWrapObjectName(tableName)));
                 }
                 return new List<ExecutionDatabaseStatement>(1)
                 {
@@ -386,7 +386,7 @@ namespace Sixnet.Database.SqlServer
                 {
                     statements.Add(new ExecutionDatabaseStatement()
                     {
-                        Script = string.Format(scriptTemplate, FormatAndWrapKeywordFunc(tableName, DatabaseObjectNameType.TableName)),
+                        Script = string.Format(scriptTemplate, FormatAndWrapObjectName(tableName)),
                         ScriptType = scriptType,
                         MustAffectData = command.Options?.MustAffectData ?? false,
                         Parameters = parameters,

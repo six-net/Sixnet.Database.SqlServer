@@ -23,10 +23,10 @@ namespace Sixnet.Database.SqlServer
 
         public SqlServerDataCommandResolver()
         {
+            KeywordPrefix = "[";
+            KeywordSuffix = "]";
             DatabaseType = DatabaseType.SQLServer;
             DefaultFieldFormatter = new SqlServerFieldFormatter();
-            FormatKeywordFunc = SqlServerManager.FormatKeyword;
-            WrapKeywordFunc = SqlServerManager.WrapKeyword;
             RecursiveKeyword = "WITH";
             DbTypeDefaultValues = new Dictionary<DbType, string>()
             {
@@ -207,7 +207,7 @@ namespace Sixnet.Database.SqlServer
                     }
                 }
                 // fields
-                insertFields.Add(FormatAndWrapKeywordFunc(field.GetFieldName(DatabaseType), DatabaseObjectNameType.ColumnName));
+                insertFields.Add(FormatAndWrapObjectName(field.GetFieldName(DatabaseType), DatabaseObjectType.Column));
                 // values
                 var insertValue = command.FieldsAssignment.GetNewValue(field.PropertyName);
                 insertValues.Add(FormatInsertValueField(context, command.Queryable, insertValue));
@@ -236,7 +236,7 @@ namespace Sixnet.Database.SqlServer
             var scriptTemplate = $"INSERT INTO {{0}} ({string.Join(",", insertFields)}) VALUES ({string.Join(",", insertValues)});";
             foreach (var tableName in tableNames)
             {
-                statementBuilder.AppendLine(string.Format(scriptTemplate, FormatAndWrapKeywordFunc(tableName, DatabaseObjectNameType.TableName)));
+                statementBuilder.AppendLine(string.Format(scriptTemplate, FormatAndWrapObjectName(tableName)));
             }
             if (autoIncrementField != null)
             {
@@ -298,7 +298,7 @@ namespace Sixnet.Database.SqlServer
 
                 SixnetDirectThrower.ThrowSixnetExceptionIf(updateField == null, $"Not found field:{propertyName}");
 
-                var fieldFormattedName = FormatAndWrapKeywordFunc(updateField.GetFieldName(DatabaseType), DatabaseObjectNameType.ColumnName);
+                var fieldFormattedName = FormatAndWrapObjectName(updateField.GetFieldName(DatabaseType), DatabaseObjectType.Column);
                 var newValueExpression = FormatUpdateValueField(context, command, newValue);
                 updateSetArray.Add($"{tablePetName}.{fieldFormattedName}={newValueExpression}");
             }
@@ -318,7 +318,7 @@ namespace Sixnet.Database.SqlServer
                 var statementBuilder = new StringBuilder();
                 foreach (var tableName in tableNames)
                 {
-                    statementBuilder.AppendLine(string.Format(scriptTemplate, FormatAndWrapKeywordFunc(tableName, DatabaseObjectNameType.TableName)));
+                    statementBuilder.AppendLine(string.Format(scriptTemplate, FormatAndWrapObjectName(tableName)));
                 }
                 return new List<ExecutionDatabaseStatement>(1)
                 {
@@ -343,7 +343,7 @@ namespace Sixnet.Database.SqlServer
                 {
                     statements.Add(new ExecutionDatabaseStatement()
                     {
-                        Script = string.Format(scriptTemplate, FormatAndWrapKeywordFunc(tableName, DatabaseObjectNameType.TableName)),
+                        Script = string.Format(scriptTemplate, FormatAndWrapObjectName(tableName)),
                         ScriptType = scriptType,
                         MustAffectData = command.Options?.MustAffectData ?? false,
                         Parameters = parameters,
@@ -400,7 +400,7 @@ namespace Sixnet.Database.SqlServer
                 var statementBuilder = new StringBuilder();
                 foreach (var tableName in tableNames)
                 {
-                    statementBuilder.AppendLine(string.Format(scriptTemplate, FormatAndWrapKeywordFunc(tableName, DatabaseObjectNameType.TableName)));
+                    statementBuilder.AppendLine(string.Format(scriptTemplate, FormatAndWrapObjectName(tableName)));
                 }
                 return new List<ExecutionDatabaseStatement>(1)
                 {
@@ -425,7 +425,7 @@ namespace Sixnet.Database.SqlServer
                 {
                     statements.Add(new ExecutionDatabaseStatement()
                     {
-                        Script = string.Format(scriptTemplate, FormatAndWrapKeywordFunc(tableName, DatabaseObjectNameType.TableName)),
+                        Script = string.Format(scriptTemplate, FormatAndWrapObjectName(tableName)),
                         ScriptType = scriptType,
                         MustAffectData = command.Options?.MustAffectData ?? false,
                         Parameters = parameters,
@@ -470,10 +470,10 @@ namespace Sixnet.Database.SqlServer
                 var primaryKeyNames = new List<string>();
                 foreach (var field in entityConfig.AllFields)
                 {
-                    var dataField = SixnetDataManager.GetField(SqlServerManager.CurrentDatabaseServerType, entityType, field.Value);
+                    var dataField = SixnetDataManager.GetField(DatabaseType, entityType, field.Value);
                     if (dataField is DataField dataEntityField)
                     {
-                        var dataFieldName = SqlServerManager.WrapKeyword(dataEntityField.GetFieldName(DatabaseType), DatabaseObjectNameType.ColumnName);
+                        var dataFieldName = FormatAndWrapObjectName(DatabaseObjectName.Create(dataEntityField.GetFieldName(DatabaseType), DatabaseObjectType.Column));
                         newFieldScripts.Add($"{dataFieldName}{GetFieldDefinition(dataEntityField, migrationInfo)}");
                         if (dataEntityField.InRole(FieldRole.PrimaryKey))
                         {
@@ -481,11 +481,12 @@ namespace Sixnet.Database.SqlServer
                         }
                     }
                 }
-                foreach (var tableName in newTableInfo.TableNames)
+                foreach (var table in newTableInfo.TableNames)
                 {
+                    var formattedTableName = FormatAndWrapObjectName(table);
                     var createTableStatement = new ExecutionDatabaseStatement()
                     {
-                        Script = $"IF NOT EXISTS (SELECT * FROM SYS.OBJECTS WHERE OBJECT_ID = OBJECT_ID(N'{tableName}') AND TYPE IN (N'U')){Environment.NewLine}BEGIN{Environment.NewLine}CREATE TABLE {tableName} ({string.Join(",", newFieldScripts)}{(primaryKeyNames.IsNullOrEmpty() ? "" : $", CONSTRAINT PK_{tableName} PRIMARY KEY CLUSTERED ({string.Join(",", primaryKeyNames)})")}){Environment.NewLine}END;"
+                        Script = $"IF NOT EXISTS (SELECT * FROM SYS.OBJECTS WHERE OBJECT_ID = OBJECT_ID(N'{formattedTableName}') AND TYPE IN (N'U')){Environment.NewLine}BEGIN{Environment.NewLine}CREATE TABLE {formattedTableName} ({string.Join(",", newFieldScripts)}{(primaryKeyNames.IsNullOrEmpty() ? "" : $", CONSTRAINT PK_{table.IdentityName} PRIMARY KEY CLUSTERED ({string.Join(",", primaryKeyNames)})")}){Environment.NewLine}END;"
                     };
                     statements.Add(createTableStatement);
 
@@ -517,12 +518,13 @@ namespace Sixnet.Database.SqlServer
             {
                 if (!tableItem.Value.IsNullOrEmpty())
                 {
+                    var formattedTableName = FormatAndWrapObjectName(tableItem.Key);
                     foreach (var field in tableItem.Value)
                     {
-                        var dataFieldName = field.GetFieldName(DatabaseType);
+                        var dataFieldName = FormatObjectName(DatabaseObjectName.Create(field.GetFieldName(DatabaseType), DatabaseObjectType.Column));
                         var newFieldStatement = new ExecutionDatabaseStatement()
                         {
-                            Script = $"IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE [object_id]=OBJECT_ID('{tableItem.Key}') AND [name]='{dataFieldName}') BEGIN ALTER TABLE {tableItem.Key} ADD {WrapKeywordFunc(dataFieldName, DatabaseObjectNameType.ColumnName)}{GetFieldDefinition(field, migrationCommand.MigrationInfo)}; END "
+                            Script = $"IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE [object_id]=OBJECT_ID('{formattedTableName}') AND [name]='{dataFieldName.Name}') BEGIN ALTER TABLE {formattedTableName} ADD {WrapObjectName(dataFieldName).Name}{GetFieldDefinition(field, migrationCommand.MigrationInfo)}; END "
                         };
                         statements.Add(newFieldStatement);
                         // Log script
@@ -549,12 +551,13 @@ namespace Sixnet.Database.SqlServer
             {
                 if (!tableItem.Value.IsNullOrEmpty())
                 {
+                    var formattedTableName = FormatAndWrapObjectName(tableItem.Key);
                     foreach (var field in tableItem.Value)
                     {
-                        var dataFieldName = field.GetFieldName(DatabaseType);
+                        var dataFieldName = FormatObjectName(DatabaseObjectName.Create(field.GetFieldName(DatabaseType), DatabaseObjectType.Column));
                         var deleteStatement = new ExecutionDatabaseStatement()
                         {
-                            Script = $"IF EXISTS (SELECT 1 FROM sys.columns WHERE [object_id]=OBJECT_ID('{tableItem.Key}') AND [name]='{dataFieldName}') BEGIN ALTER TABLE {tableItem.Key} DROP COLUMN {WrapKeywordFunc(dataFieldName, DatabaseObjectNameType.ColumnName)}; END "
+                            Script = $"IF EXISTS (SELECT 1 FROM sys.columns WHERE [object_id]=OBJECT_ID('{formattedTableName}') AND [name]='{dataFieldName.Name}') BEGIN ALTER TABLE {formattedTableName} DROP COLUMN {WrapObjectName(dataFieldName).Name}; END "
                         };
                         statements.Add(deleteStatement);
                         // Log script
@@ -583,22 +586,23 @@ namespace Sixnet.Database.SqlServer
                 {
                     continue;
                 }
+                var formattedTableName = FormatAndWrapObjectName(tableItem.Key);
                 foreach (var fieldItem in tableItem.Value)
                 {
                     var field = fieldItem.Value;
                     var nowFieldName = fieldItem.Key;
-                    var newFieldName = field.GetFieldName(DatabaseType);
+                    var newFieldName = FormatObjectName(DatabaseObjectName.Create(field.GetFieldName(DatabaseType), DatabaseObjectType.Column));
                     var updateStatement = new ExecutionDatabaseStatement()
                     {
-                        Script = $"IF EXISTS (SELECT 1 FROM sys.columns WHERE [object_id]=OBJECT_ID('{tableItem.Key}') AND [name]='{nowFieldName}') BEGIN ALTER TABLE {tableItem.Key} ALTER COLUMN {WrapKeywordFunc(nowFieldName, DatabaseObjectNameType.ColumnName)}{GetFieldDefinition(field, migrationCommand.MigrationInfo)}; END "
+                        Script = $"IF EXISTS (SELECT 1 FROM sys.columns WHERE [object_id]=OBJECT_ID('{formattedTableName}') AND [name]='{nowFieldName}') BEGIN ALTER TABLE {formattedTableName} ALTER COLUMN {WrapObjectName(DatabaseObjectName.Create(nowFieldName, DatabaseObjectType.Column)).Name}{GetFieldDefinition(field, migrationCommand.MigrationInfo)}; END "
                     };
                     statements.Add(updateStatement);
                     LogExecutionStatement(updateStatement);
-                    if (!string.Equals(nowFieldName, newFieldName, StringComparison.OrdinalIgnoreCase))
+                    if (!string.Equals(nowFieldName, newFieldName.Name, StringComparison.OrdinalIgnoreCase))
                     {
                         var renameStatement = new ExecutionDatabaseStatement()
                         {
-                            Script = $"IF EXISTS (SELECT 1 FROM sys.columns WHERE [object_id]=OBJECT_ID('{tableItem.Key}') AND [name]='{nowFieldName}') EXEC sp_rename '{tableItem.Key}.{nowFieldName}', {newFieldName}, 'COLUMN'; END "
+                            Script = $"IF EXISTS (SELECT 1 FROM sys.columns WHERE [object_id]=OBJECT_ID('{formattedTableName}') AND [name]='{nowFieldName}') EXEC sp_rename '{formattedTableName}.{nowFieldName}', {WrapObjectName(newFieldName).Name}, 'COLUMN'; END "
                         };
                         statements.Add(renameStatement);
                         LogExecutionStatement(renameStatement);
@@ -621,12 +625,13 @@ namespace Sixnet.Database.SqlServer
             }
             var renameTables = migrationInfo.RenameTables;
             var statements = new List<ExecutionDatabaseStatement>();
-            var options = migrationCommand.MigrationInfo;
             foreach (var tableItem in renameTables)
             {
+                var oldFormattedTableName = FormatAndWrapObjectName(tableItem.Key);
+                var newFormattedTableName = FormatObjectName(tableItem.Value);
                 var renameTableStatement = new ExecutionDatabaseStatement()
                 {
-                    Script = $"IF OBJECT_ID('{tableItem.Key}', 'U') IS NOT NULL BEGIN EXEC sp_rename 'dbo.OldTableName', 'NewTableName';\r\nEND"
+                    Script = $"IF OBJECT_ID('{oldFormattedTableName}', 'U') IS NOT NULL BEGIN EXEC sp_rename '{oldFormattedTableName}', '{newFormattedTableName.Name}'; END"
                 };
                 statements.Add(renameTableStatement);
 

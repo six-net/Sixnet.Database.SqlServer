@@ -5,6 +5,7 @@ using System.Data.SqlClient;
 using System.Linq;
 using System.Threading.Tasks;
 
+using Sixnet.Development.Data;
 using Sixnet.Development.Data.Command;
 using Sixnet.Development.Data.Dapper;
 using Sixnet.Development.Data.Database;
@@ -42,6 +43,23 @@ namespace Sixnet.Database.SqlServer
             return SqlServerManager.GetConnection(server);
         }
 
+        /// <summary>
+        /// Get db connection meta
+        /// </summary>
+        /// <param name="connection"></param>
+        /// <returns></returns>
+        public override DatabaseConnectionMeta GetDbConnectionMeta(IDbConnection connection)
+        {
+            var sqlBuilder = new SqlConnectionStringBuilder(connection.ConnectionString);
+            return new DatabaseConnectionMeta()
+            {
+                UserName = sqlBuilder.UserID,
+                Password = sqlBuilder.Password,
+                DataSource = sqlBuilder.DataSource,
+                DatabaseName = sqlBuilder.InitialCatalog,
+            };
+        }
+
         #endregion
 
         #region Data command resolver
@@ -66,7 +84,7 @@ namespace Sixnet.Database.SqlServer
         /// <returns></returns>
         protected override DynamicParameters ConvertDataCommandParameters(DataCommandParameters parameters)
         {
-            return parameters?.ConvertToDynamicParameters(SqlServerManager.CurrentDatabaseServerType);
+            return parameters?.ConvertToDynamicParameters(SqlServerManager.GetCommandResolver().DatabaseType);
         }
 
         #endregion

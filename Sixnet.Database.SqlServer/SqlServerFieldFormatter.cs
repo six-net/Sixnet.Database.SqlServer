@@ -127,7 +127,7 @@ namespace Sixnet.Database.SqlServer
                 FieldFormatterNames.STRING_INDEX_OF_ANY => StringIndexOfAny(formatedFieldName, formatOption.Parameter),
                 FieldFormatterNames.STRING_LAST_INDEX_OF => StringLastIndexOf(formatedFieldName, formatOption.Parameter),
                 FieldFormatterNames.STRING_LAST_INDEX_OF_ANY => StringLastIndexOfAny(formatedFieldName, formatOption.Parameter),
-                _ => throw new SixnetException($"{SqlServerManager.CurrentDatabaseServerType} does not support field formatter: {formatOption.Name}"),
+                _ => throw new SixnetException($"{context.Server.DatabaseType} does not support field formatter: {formatOption.Name}"),
             };
             return formatedFieldName;
         }
