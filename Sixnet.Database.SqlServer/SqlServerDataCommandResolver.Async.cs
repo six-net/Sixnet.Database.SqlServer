@@ -24,17 +24,17 @@ namespace Sixnet.Database.SqlServer
         /// <param name="translationResult">Queryable translation result</param>
         /// <param name="location">Queryable location</param>
         /// <returns></returns>
-        protected override async Task<QueryDatabaseStatement> GenerateQueryStatementCoreAsync(DataCommandResolveContext context, QueryableTranslationResult translationResult, QueryableLocation location)
+        protected override async Task<SixnetQueryDatabaseStatement> GenerateQueryStatementCoreAsync(SixnetDataCommandResolveContext context, SixnetQueryableTranslationResult translationResult, SixnetQueryableLocation location)
         {
             var queryable = translationResult.GetOriginalQueryable();
             string sqlStatement;
             IEnumerable<ISixnetField> outputFields = null;
             switch (queryable.ExecutionMode)
             {
-                case QueryableExecutionMode.Script:
+                case SixnetQueryableExecutionMode.Script:
                     sqlStatement = translationResult.GetCondition();
                     break;
-                case QueryableExecutionMode.Regular:
+                case SixnetQueryableExecutionMode.Regular:
                 default:
                     // table pet name
                     var tablePetName = context.GetTablePetName(queryable, queryable.GetModelType());
@@ -71,7 +71,7 @@ namespace Sixnet.Database.SqlServer
                     {
                         outputFields = SixnetDataManager.GetQueryableFields(DatabaseType, queryable.GetModelType(), queryable, context.IsRootQueryable(queryable));
                     }
-                    var outputFieldString = await FormatFieldsStringAsync(context, queryable, location, FieldLocation.Output, outputFields).ConfigureAwait(false);
+                    var outputFieldString = await FormatFieldsStringAsync(context, queryable, location, SixnetFieldLocation.Output, outputFields).ConfigureAwait(false);
 
                     //sort
                     var hasOffset = queryable.SkipCount > 0;
@@ -95,14 +95,14 @@ namespace Sixnet.Database.SqlServer
                     var preScript = GetPreScript(context, location);
                     switch (queryable.OutputType)
                     {
-                        case QueryableOutputType.Count:
+                        case SixnetQueryableOutputType.Count:
                             sqlStatement = hasCombine
                                 ? hasSort
                                     ? $"{preScript}SELECT COUNT(1) FROM ((SELECT {tablePetName}.* FROM ({sqlStatement}){TablePetNameKeyword}{tablePetName}){combine}){TablePetNameKeyword}{tablePetName}"
                                     : $"{preScript}SELECT COUNT(1) FROM (({sqlStatement}){combine}){TablePetNameKeyword}{tablePetName}"
                                 : $"{preScript}SELECT COUNT(1) FROM ({sqlStatement}){TablePetNameKeyword}{tablePetName}";
                             break;
-                        case QueryableOutputType.Predicate:
+                        case SixnetQueryableOutputType.Predicate:
                             sqlStatement = hasCombine
                                 ? hasSort
                                     ? $"{preScript}SELECT 1 WHERE EXISTS((SELECT {tablePetName}.* FROM ({sqlStatement}){TablePetNameKeyword}{tablePetName}){combine})"
@@ -124,11 +124,11 @@ namespace Sixnet.Database.SqlServer
             var parameters = context.GetParameters();
 
             //log script
-            if (location == QueryableLocation.Top)
+            if (location == SixnetQueryableLocation.Top)
             {
                 LogScript(sqlStatement, parameters);
             }
-            return QueryDatabaseStatement.Create(sqlStatement, parameters, outputFields);
+            return SixnetQueryDatabaseStatement.Create(sqlStatement, parameters, outputFields);
         }
 
         #endregion
@@ -140,7 +140,7 @@ namespace Sixnet.Database.SqlServer
         /// </summary>
         /// <param name="context">Command resolve context</param>
         /// <returns></returns>
-        protected override async Task<List<ExecutionDatabaseStatement>> GenerateInsertStatementsAsync(DataCommandResolveContext context)
+        protected override async Task<List<SixnetExecutionDatabaseStatement>> GenerateInsertStatementsAsync(SixnetDataCommandResolveContext context)
         {
             var command = context.DataCommandExecutionContext.Command;
             var dataCommandExecutionContext = context.DataCommandExecutionContext;
@@ -149,16 +149,16 @@ namespace Sixnet.Database.SqlServer
             var fieldCount = fields.GetCount();
             var insertFields = new List<string>(fieldCount);
             var insertValues = new List<string>(fieldCount);
-            DataField autoIncrementField = null;
-            DataField splitField = null;
+            SixnetDataField autoIncrementField = null;
+            SixnetDataField splitField = null;
             dynamic splitValue = default;
 
             foreach (var field in fields)
             {
-                if (field.InRole(FieldRole.Increment))
+                if (field.InRole(SixnetFieldRole.Increment))
                 {
                     autoIncrementField ??= field;
-                    if (!autoIncrementField.InRole(FieldRole.PrimaryKey) && field.InRole(FieldRole.PrimaryKey)) // get first primary key field
+                    if (!autoIncrementField.InRole(SixnetFieldRole.PrimaryKey) && field.InRole(SixnetFieldRole.PrimaryKey)) // get first primary key field
                     {
                         autoIncrementField = field;
                     }
@@ -168,13 +168,13 @@ namespace Sixnet.Database.SqlServer
                     }
                 }
                 // fields
-                insertFields.Add(FormatAndWrapObjectName(field.GetFieldName(DatabaseType), DatabaseObjectType.Column));
+                insertFields.Add(FormatAndWrapObjectName(field.GetFieldName(DatabaseType), SixnetDatabaseObjectType.Column));
                 // values
                 var insertValue = command.FieldsAssignment.GetNewValue(field.PropertyName);
                 insertValues.Add(await FormatInsertValueFieldAsync(context, command.Queryable, insertValue).ConfigureAwait(false));
 
                 // split value
-                if (field.InRole(FieldRole.SplitValue))
+                if (field.InRole(SixnetFieldRole.SplitValue))
                 {
                     splitValue = insertValue;
                     splitField = field;
@@ -206,9 +206,9 @@ namespace Sixnet.Database.SqlServer
                 statementBuilder.AppendLine($"DECLARE {incrParameter} BIGINT;SET {incrParameter} = SCOPE_IDENTITY();");
                 incrScripts.Add($"{incrParameter} {ColumnPetNameKeyword} {incrField}");
             }
-            return new List<ExecutionDatabaseStatement>()
+            return new List<SixnetExecutionDatabaseStatement>()
             {
-                new ExecutionDatabaseStatement()
+                new SixnetExecutionDatabaseStatement()
                 {
                     Script = statementBuilder.ToString(),
                     ScriptType = GetCommandType(command),
@@ -228,7 +228,7 @@ namespace Sixnet.Database.SqlServer
         /// </summary>
         /// <param name="context">Command resolve context</param>
         /// <returns></returns>
-        protected override async Task<List<ExecutionDatabaseStatement>> GenerateUpdateStatementsAsync(DataCommandResolveContext context)
+        protected override async Task<List<SixnetExecutionDatabaseStatement>> GenerateUpdateStatementsAsync(SixnetDataCommandResolveContext context)
         {
             var command = context.DataCommandExecutionContext.Command;
             SixnetException.ThrowIf(command?.FieldsAssignment?.NewValues.IsNullOrEmpty() ?? true, "No set update field");
@@ -255,17 +255,17 @@ namespace Sixnet.Database.SqlServer
             {
                 var newValue = newValueItem.Value;
                 var propertyName = newValueItem.Key;
-                var updateField = SixnetDataManager.GetField(dataCommandExecutionContext.Server.DatabaseType, command.GetEntityType(), DataField.Create(propertyName)) as DataField;
+                var updateField = SixnetDataManager.GetField(dataCommandExecutionContext.Server.DatabaseType, command.GetEntityType(), SixnetDataField.Create(propertyName)) as SixnetDataField;
 
                 SixnetDirectThrower.ThrowSixnetExceptionIf(updateField == null, $"Not found field:{propertyName}");
 
-                var fieldFormattedName = FormatAndWrapObjectName(updateField.GetFieldName(DatabaseType), DatabaseObjectType.Column);
+                var fieldFormattedName = FormatAndWrapObjectName(updateField.GetFieldName(DatabaseType), SixnetDatabaseObjectType.Column);
                 var newValueExpression = await FormatUpdateValueFieldAsync(context, command, newValue).ConfigureAwait(false);
                 updateSetArray.Add($"{tablePetName}.{fieldFormattedName}={newValueExpression}");
             }
 
             // parameters
-            var parameters = ConvertParameter(command.ScriptParameters) ?? new DataCommandParameters();
+            var parameters = ConvertParameter(command.ScriptParameters) ?? new SixnetDataCommandParameters();
             parameters.Union(context.GetParameters());
 
             // statement
@@ -281,9 +281,9 @@ namespace Sixnet.Database.SqlServer
                 {
                     statementBuilder.AppendLine(string.Format(scriptTemplate, FormatAndWrapObjectName(tableName)));
                 }
-                return new List<ExecutionDatabaseStatement>(1)
+                return new List<SixnetExecutionDatabaseStatement>(1)
                 {
-                    new ExecutionDatabaseStatement()
+                    new SixnetExecutionDatabaseStatement()
                     {
                         Script = statementBuilder.ToString(),
                         ScriptType = scriptType,
@@ -295,14 +295,14 @@ namespace Sixnet.Database.SqlServer
             }
             else
             {
-                var queryStatement = await GenerateQueryStatementCoreAsync(context, translationResult, QueryableLocation.JoinTarget).ConfigureAwait(false);
+                var queryStatement = await GenerateQueryStatementCoreAsync(context, translationResult, SixnetQueryableLocation.JoinTarget).ConfigureAwait(false);
                 var updateTablePetName = "UTB";
                 var joinItems = FormatWrapJoinPrimaryKeys(context, command.Queryable, command.GetEntityType(), tablePetName, tablePetName, updateTablePetName);
                 scriptTemplate = $"{FormatPreScript(context)}UPDATE {tablePetName} SET {string.Join(",", updateSetArray)} FROM {{0}}{TablePetNameKeyword}{tablePetName} INNER JOIN ({queryStatement.Script}){TablePetNameKeyword}{updateTablePetName} ON {string.Join(" AND ", joinItems)};";
-                var statements = new List<ExecutionDatabaseStatement>(tableNames.Count);
+                var statements = new List<SixnetExecutionDatabaseStatement>(tableNames.Count);
                 foreach (var tableName in tableNames)
                 {
-                    statements.Add(new ExecutionDatabaseStatement()
+                    statements.Add(new SixnetExecutionDatabaseStatement()
                     {
                         Script = string.Format(scriptTemplate, FormatAndWrapObjectName(tableName)),
                         ScriptType = scriptType,
@@ -327,7 +327,7 @@ namespace Sixnet.Database.SqlServer
         /// </summary>
         /// <param name="context">Command resolve context</param>
         /// <returns></returns>
-        protected override async Task<List<ExecutionDatabaseStatement>> GenerateDeleteStatementsAsync(DataCommandResolveContext context)
+        protected override async Task<List<SixnetExecutionDatabaseStatement>> GenerateDeleteStatementsAsync(SixnetDataCommandResolveContext context)
         {
             var dataCommandExecutionContext = context.DataCommandExecutionContext;
             var command = dataCommandExecutionContext.Command;
@@ -347,7 +347,7 @@ namespace Sixnet.Database.SqlServer
             SixnetDirectThrower.ThrowInvalidOperationIf(tableNames.IsNullOrEmpty(), $"Get table name failed for {entityType.Name}");
 
             // parameters
-            var parameters = ConvertParameter(command.ScriptParameters) ?? new DataCommandParameters();
+            var parameters = ConvertParameter(command.ScriptParameters) ?? new SixnetDataCommandParameters();
             parameters.Union(context.GetParameters());
 
             // statement
@@ -363,9 +363,9 @@ namespace Sixnet.Database.SqlServer
                 {
                     statementBuilder.AppendLine(string.Format(scriptTemplate, FormatAndWrapObjectName(tableName)));
                 }
-                return new List<ExecutionDatabaseStatement>(1)
+                return new List<SixnetExecutionDatabaseStatement>(1)
                 {
-                    new ExecutionDatabaseStatement()
+                    new SixnetExecutionDatabaseStatement()
                     {
                         Script = statementBuilder.ToString(),
                         ScriptType = scriptType,
@@ -377,14 +377,14 @@ namespace Sixnet.Database.SqlServer
             }
             else
             {
-                var queryStatement = await GenerateQueryStatementCoreAsync(context, translationResult, QueryableLocation.JoinTarget).ConfigureAwait(false);
+                var queryStatement = await GenerateQueryStatementCoreAsync(context, translationResult, SixnetQueryableLocation.JoinTarget).ConfigureAwait(false);
                 var updateTablePetName = "UTB";
                 var joinItems = FormatWrapJoinPrimaryKeys(context, command.Queryable, command.GetEntityType(), tablePetName, tablePetName, updateTablePetName);
                 scriptTemplate = $"{FormatPreScript(context)}DELETE {tablePetName} FROM {{0}}{TablePetNameKeyword}{tablePetName} INNER JOIN ({queryStatement.Script}){TablePetNameKeyword}{updateTablePetName} ON {string.Join(" AND ", joinItems)};";
-                var statements = new List<ExecutionDatabaseStatement>(tableNames.Count);
+                var statements = new List<SixnetExecutionDatabaseStatement>(tableNames.Count);
                 foreach (var tableName in tableNames)
                 {
-                    statements.Add(new ExecutionDatabaseStatement()
+                    statements.Add(new SixnetExecutionDatabaseStatement()
                     {
                         Script = string.Format(scriptTemplate, FormatAndWrapObjectName(tableName)),
                         ScriptType = scriptType,
@@ -403,15 +403,15 @@ namespace Sixnet.Database.SqlServer
 
         #region Get default sort
 
-        protected override async Task<string> GetDefaultSortAsync(DataCommandResolveContext context, QueryableTranslationResult translationResult, ISixnetQueryable originalQueryable, IEnumerable<ISixnetField> dataFields, string tablePetName)
+        protected override async Task<string> GetDefaultSortAsync(SixnetDataCommandResolveContext context, SixnetQueryableTranslationResult translationResult, ISixnetQueryable originalQueryable, IEnumerable<ISixnetField> dataFields, string tablePetName)
         {
-            var defaultSortField = dataFields?.Where(f => f is DataField)
-                                              .OrderByDescending(f => f.InRole(FieldRole.Sequence))
-                                              .ThenByDescending(f => f.InRole(FieldRole.PrimaryKey))
+            var defaultSortField = dataFields?.Where(f => f is SixnetDataField)
+                                              .OrderByDescending(f => f.InRole(SixnetFieldRole.Sequence))
+                                              .ThenByDescending(f => f.InRole(SixnetFieldRole.PrimaryKey))
                                               .FirstOrDefault();
             if (defaultSortField != null)
             {
-                var orderField = DataField.Create(defaultSortField.PropertyName, originalQueryable.GetModelType());
+                var orderField = SixnetDataField.Create(defaultSortField.PropertyName, originalQueryable.GetModelType());
                 originalQueryable.OrderBy(orderField);
                 await AppendSortAsync(context, originalQueryable, translationResult, true).ConfigureAwait(false);
             }

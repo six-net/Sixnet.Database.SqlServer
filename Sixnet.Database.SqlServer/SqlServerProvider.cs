@@ -16,7 +16,7 @@ namespace Sixnet.Database.SqlServer
     /// <summary>
     /// Imeplements database provider for sqlserver
     /// </summary>
-    public class SqlServerProvider : BaseDatabaseProvider
+    public class SqlServerProvider : SixnetBaseDatabaseProvider
     {
         #region Constructor
 
@@ -38,7 +38,7 @@ namespace Sixnet.Database.SqlServer
         /// </summary>
         /// <param name="server">Database server</param>
         /// <returns></returns>
-        public override IDbConnection GetDbConnection(DatabaseServer server)
+        public override IDbConnection GetDbConnection(SixnetDatabaseServer server)
         {
             return SqlServerManager.GetConnection(server);
         }
@@ -48,10 +48,10 @@ namespace Sixnet.Database.SqlServer
         /// </summary>
         /// <param name="connection"></param>
         /// <returns></returns>
-        public override DatabaseConnectionMeta GetDbConnectionMeta(IDbConnection connection)
+        public override SixnetDatabaseConnectionMeta GetDbConnectionMeta(IDbConnection connection)
         {
             var sqlBuilder = new SqlConnectionStringBuilder(connection.ConnectionString);
-            return new DatabaseConnectionMeta()
+            return new SixnetDatabaseConnectionMeta()
             {
                 UserName = sqlBuilder.UserID,
                 Password = sqlBuilder.Password,
@@ -82,7 +82,7 @@ namespace Sixnet.Database.SqlServer
         /// </summary>
         /// <param name="parameters">Data command parameters</param>
         /// <returns></returns>
-        protected override DynamicParameters ConvertDataCommandParameters(DataCommandParameters parameters)
+        protected override DynamicParameters ConvertDataCommandParameters(SixnetDataCommandParameters parameters)
         {
             return parameters?.ConvertToDynamicParameters(SqlServerManager.GetCommandResolver().DatabaseType);
         }
@@ -95,7 +95,7 @@ namespace Sixnet.Database.SqlServer
         /// Bulk insert datas
         /// </summary>
         /// <param name="command">Database bulk insert command</param>
-        public override async Task BulkInsertAsync(BulkInsertDatabaseCommand command)
+        public override async Task BulkInsertAsync(SixnetBulkInsertDatabaseCommand command)
         {
             SixnetException.ThrowIf(command?.DataTable == null, "Not set datatable");
             var bulkInsertOptions = command.BulkInsertionOptions;
@@ -143,7 +143,7 @@ namespace Sixnet.Database.SqlServer
         /// Bulk insert datas
         /// </summary>
         /// <param name="command">Database bulk insert command</param>
-        public override void BulkInsert(BulkInsertDatabaseCommand command)
+        public override void BulkInsert(SixnetBulkInsertDatabaseCommand command)
         {
             SixnetException.ThrowIf(command?.DataTable == null, "Not set datatable");
             var bulkInsertOptions = command.BulkInsertionOptions;
