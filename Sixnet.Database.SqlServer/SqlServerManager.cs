@@ -1,6 +1,5 @@
 ﻿using System.Data;
-using System.Data.SqlClient;
-
+using Microsoft.Data.SqlClient;
 using Sixnet.Development.Data;
 using Sixnet.Development.Data.Database;
 
