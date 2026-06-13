@@ -14,15 +14,27 @@
     <copyright>Copyright © DingBin.Li</copyright>
     <tags>.NET,Sixnet,SQL Serever</tags>
     <dependencies>
-      <group targetFramework=".NETStandard2.1">
-        <dependency id="System.Data.SqlClient" version="4.8.6" />
-        <dependency id="Sixnet" version="2.0.0" />
+      <group targetFramework="net6.0">
+        <dependency id="Microsoft.Data.SqlClient" version="7.0.1" />
+        <dependency id="Sixnet" version="2.1.1" />
+      </group>
+	  <group targetFramework="net8.0">
+        <dependency id="Microsoft.Data.SqlClient" version="7.0.1" />
+        <dependency id="Sixnet" version="2.1.1" />
+      </group>
+	  <group targetFramework="net10.0">
+        <dependency id="Microsoft.Data.SqlClient" version="7.0.1" />
+        <dependency id="Sixnet" version="2.1.1" />
       </group>
     </dependencies>
   </metadata>
   <files>
-    <file src="Sixnet.Database.SqlServer\bin\$configuration$\netstandard2.1\Sixnet.Database.SqlServer.dll" target="lib\netstandard2.1" />
-	<file src="Sixnet.Database.SqlServer\bin\$configuration$\netstandard2.1\Sixnet.Database.SqlServer.pdb" target="lib\netstandard2.1" />
+    <file src="Sixnet.Database.SqlServer\bin\$configuration$\net6.0\Sixnet.Database.SqlServer.dll" target="lib\net6.0" />
+	<file src="Sixnet.Database.SqlServer\bin\$configuration$\net6.0\Sixnet.Database.SqlServer.pdb" target="lib\net6.0" />
+	<file src="Sixnet.Database.SqlServer\bin\$configuration$\net8.0\Sixnet.Database.SqlServer.dll" target="lib\net8.0" />
+	<file src="Sixnet.Database.SqlServer\bin\$configuration$\net8.0\Sixnet.Database.SqlServer.pdb" target="lib\net8.0" />
+	<file src="Sixnet.Database.SqlServer\bin\$configuration$\net10.0\Sixnet.Database.SqlServer.dll" target="lib\net10.0" />
+	<file src="Sixnet.Database.SqlServer\bin\$configuration$\net10.0\Sixnet.Database.SqlServer.pdb" target="lib\net10.0" />
 	<file src=".\nugeticon.png" target="images\" />
   </files>
 </package>
