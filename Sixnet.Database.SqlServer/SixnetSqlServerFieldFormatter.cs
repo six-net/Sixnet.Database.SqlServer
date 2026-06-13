@@ -8,7 +8,7 @@ namespace Sixnet.Database.SqlServer
     /// <summary>
     /// Default field formatter for sqlserver
     /// </summary>
-    public class SqlServerFieldFormatter : ISixnetFieldFormatter
+    public class SixnetSqlServerFieldFormatter : ISixnetFieldFormatter
     {
         static List<StringComparison> StringIgnoreCaseValues = new List<StringComparison>()
         {

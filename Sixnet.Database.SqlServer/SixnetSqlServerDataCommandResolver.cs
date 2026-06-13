@@ -17,16 +17,16 @@ namespace Sixnet.Database.SqlServer
     /// <summary>
     /// Defines data command resolver for sqlserver
     /// </summary>
-    internal partial class SqlServerDataCommandResolver : SixnetBaseDataCommandResolver
+    internal partial class SixnetSqlServerDataCommandResolver : SixnetBaseDataCommandResolver
     {
         #region Constructor
 
-        public SqlServerDataCommandResolver()
+        public SixnetSqlServerDataCommandResolver()
         {
             KeywordPrefix = "[";
             KeywordSuffix = "]";
             DatabaseType = SixnetDatabaseType.SQLServer;
-            DefaultFieldFormatter = new SqlServerFieldFormatter();
+            DefaultFieldFormatter = new SixnetSqlServerFieldFormatter();
             RecursiveKeyword = "WITH";
             DbTypeDefaultValues = new Dictionary<DbType, string>()
             {

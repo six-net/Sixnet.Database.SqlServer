@@ -8,14 +8,14 @@ namespace Sixnet.Database.SqlServer
     /// <summary>
     /// Defines sqlserver manager
     /// </summary>
-    internal static class SqlServerManager
+    internal static class SixnetSqlServerManager
     {
         #region Fields
 
         /// <summary>
         /// Default data command resolver
         /// </summary>
-        static readonly SqlServerDataCommandResolver DefaultDataCommandResolver = new();
+        static readonly SixnetSqlServerDataCommandResolver DefaultDataCommandResolver = new();
 
         #endregion
 
@@ -39,7 +39,7 @@ namespace Sixnet.Database.SqlServer
         /// Get command resolver
         /// </summary>
         /// <returns>Return a command resolver</returns>
-        internal static SqlServerDataCommandResolver GetCommandResolver()
+        internal static SixnetSqlServerDataCommandResolver GetCommandResolver()
         {
             return DefaultDataCommandResolver;
         }

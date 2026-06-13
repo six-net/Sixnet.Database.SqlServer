@@ -13,7 +13,7 @@ using System.Linq;
 
 namespace Sixnet.Database.SqlServer
 {
-    internal partial class SqlServerDataCommandResolver
+    internal partial class SixnetSqlServerDataCommandResolver
     {
         #region Get query statement
 

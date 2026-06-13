@@ -15,7 +15,7 @@
     <tags>.NET,Sixnet,SQL Serever</tags>
     <dependencies>
         <dependency id="Microsoft.Data.SqlClient" version="7.0.1" />
-        <dependency id="Sixnet" version="2.1.1" />
+        <dependency id="Sixnet" version="3.0.0" />
     </dependencies>
   </metadata>
   <files>

@@ -14,11 +14,11 @@ namespace Sixnet.Database.SqlServer
     /// <summary>
     /// Imeplements database provider for sqlserver
     /// </summary>
-    public class SqlServerProvider : SixnetBaseDatabaseProvider
+    public class SixnetSqlServerProvider : SixnetBaseDatabaseProvider
     {
         #region Constructor
 
-        public SqlServerProvider()
+        public SixnetSqlServerProvider()
         {
             queryDatabasesScript = "SELECT [DBID] AS [ID], [NAME] FROM [SYSDATABASES] WITH (NOLOCK) ORDER BY DBID;";
             queryTablesScript = "SELECT T.[OBJECT_ID] AS [ID], T.[NAME], T.[SCHEMA_ID] AS [SCHEMAID], S.[NAME] AS [SCHEMANAME] FROM SYS.TABLES T WITH (NOLOCK) INNER JOIN SYS.SCHEMAS S  WITH (NOLOCK) ON T.[SCHEMA_ID] = S.[SCHEMA_ID] ORDER BY S.[NAME], T.[NAME];";
@@ -38,7 +38,7 @@ namespace Sixnet.Database.SqlServer
         /// <returns></returns>
         public override IDbConnection GetDbConnection(SixnetDatabaseServer server)
         {
-            return SqlServerManager.GetConnection(server);
+            return SixnetSqlServerManager.GetConnection(server);
         }
 
         /// <summary>
@@ -68,7 +68,7 @@ namespace Sixnet.Database.SqlServer
         /// <returns></returns>
         protected override ISixnetDataCommandResolver GetDataCommandResolver()
         {
-            return SqlServerManager.GetCommandResolver();
+            return SixnetSqlServerManager.GetCommandResolver();
         }
 
         #endregion
@@ -82,7 +82,7 @@ namespace Sixnet.Database.SqlServer
         /// <returns></returns>
         protected override DynamicParameters ConvertDataCommandParameters(SixnetDataCommandParameters parameters)
         {
-            return parameters?.ConvertToDynamicParameters(SqlServerManager.GetCommandResolver().DatabaseType);
+            return parameters?.ConvertToDynamicParameters(SixnetSqlServerManager.GetCommandResolver().DatabaseType);
         }
 
         #endregion
@@ -97,7 +97,7 @@ namespace Sixnet.Database.SqlServer
         {
             SixnetException.ThrowIf(command?.DataTable == null, "Not set datatable");
             var bulkInsertOptions = command.BulkInsertionOptions;
-            var sqlServerBulkInsertOptions = bulkInsertOptions as SqlServerBulkInsertOptions;
+            var sqlServerBulkInsertOptions = bulkInsertOptions as SixnetSqlServerBulkInsertOptions;
             var dbConnection = command.Connection.DbConnection as SqlConnection;
             try
             {
@@ -145,7 +145,7 @@ namespace Sixnet.Database.SqlServer
         {
             SixnetException.ThrowIf(command?.DataTable == null, "Not set datatable");
             var bulkInsertOptions = command.BulkInsertionOptions;
-            var sqlServerBulkInsertOptions = bulkInsertOptions as SqlServerBulkInsertOptions;
+            var sqlServerBulkInsertOptions = bulkInsertOptions as SixnetSqlServerBulkInsertOptions;
             var dbConnection = command.Connection.DbConnection as SqlConnection;
             try
             {

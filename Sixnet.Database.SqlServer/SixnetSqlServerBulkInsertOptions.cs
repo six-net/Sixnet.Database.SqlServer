@@ -8,7 +8,7 @@ namespace Sixnet.Database.SqlServer
     /// <summary>
     /// SqlServer bulk insert options
     /// </summary>
-    public class SqlServerBulkInsertOptions : ISixnetBulkInsertionOptions
+    public class SixnetSqlServerBulkInsertOptions : ISixnetBulkInsertionOptions
     {
         /// <summary>
         /// Gets or sets the data operation options.
