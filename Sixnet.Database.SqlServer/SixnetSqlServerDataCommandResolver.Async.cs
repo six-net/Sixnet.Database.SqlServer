@@ -31,7 +31,7 @@ namespace Sixnet.Database.SqlServer
             var queryable = translationResult.GetOriginalQueryable();
             string sqlStatement;
             IEnumerable<ISixnetField> outputFields = null;
-            switch (queryable.ExecutionMode)
+            switch (queryable.Info.ExecutionMode)
             {
                 case SixnetQueryableExecutionMode.Script:
                     sqlStatement = translationResult.GetCondition();
@@ -69,15 +69,15 @@ namespace Sixnet.Database.SqlServer
                     }
 
                     // output fields
-                    if (outputFields.IsNullOrEmpty() || !queryable.SelectedFields.IsNullOrEmpty())
+                    if (outputFields.IsNullOrEmpty() || !queryable.Info.SelectedFields.IsNullOrEmpty())
                     {
                         outputFields = SixnetDataManager.GetQueryableFields(DatabaseType, queryable.GetModelType(), queryable, context.IsRootQueryable(queryable));
                     }
                     var outputFieldString = await FormatFieldsStringAsync(context, queryable, location, SixnetFieldLocation.Output, outputFields).ConfigureAwait(false);
 
                     //sort
-                    var hasOffset = queryable.SkipCount > 0;
-                    var hasTakeNum = queryable.TakeCount > 0;
+                    var hasOffset = queryable.Info.SkipCount > 0;
+                    var hasTakeNum = queryable.Info.TakeCount > 0;
                     var sort = translationResult.GetSort();
                     var hasSort = !string.IsNullOrWhiteSpace(sort);
                     if (hasTakeNum && hasOffset && !hasSort)
@@ -87,7 +87,7 @@ namespace Sixnet.Database.SqlServer
                     }
 
                     //limit
-                    var limit = GetLimitString(queryable.SkipCount, queryable.TakeCount, hasSort);
+                    var limit = GetLimitString(queryable.Info.SkipCount, queryable.Info.TakeCount, hasSort);
                     var hasLimit = !string.IsNullOrWhiteSpace(limit);
                     var useTop = hasLimit && limit.Contains("TOP");
 
@@ -95,7 +95,7 @@ namespace Sixnet.Database.SqlServer
                     sqlStatement = $"SELECT {GetDistinctString(queryable)} {(useTop ? limit : "")}{outputFieldString} FROM {targetScript}{sort}{(!useTop && hasLimit ? limit : "")}";
                     //pre script
                     var preScript = GetPreScript(context, location);
-                    switch (queryable.OutputType)
+                    switch (queryable.Info.OutputType)
                     {
                         case SixnetQueryableOutputType.Count:
                             sqlStatement = hasCombine

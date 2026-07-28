@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.Data;
 using System.Linq;
 using System.Threading.Tasks;
+
 using Microsoft.Data.SqlClient;
+
 using Sixnet.Development.Data.Command;
 using Sixnet.Development.Data.Dapper;
 using Sixnet.Development.Data.Database;
@@ -218,6 +220,58 @@ namespace Sixnet.Database.SqlServer
                 }
             }
             return ex;
+        }
+
+        #endregion
+
+        #region Create temp table
+
+        /// <summary>
+        /// Create temp table
+        /// </summary>
+        /// <param name="command"></param>
+        /// <returns></returns>
+        public override SixnetTempTable CreateTempTable(SixnetSingleDatabaseCommand command)
+        {
+            try
+            {
+                var dataCommandResolver = GetDataCommandResolver();
+                var queryStatement = dataCommandResolver.GenerateDatabaseQueryStatement(command);
+                command.Connection.DbConnection.Execute(GetCommandDefinition(command, queryStatement));
+
+                return new SixnetTempTable()
+                {
+                    Name = $"#{command.DataCommand?.Queryable?.Info.TempTableName}"
+                };
+            }
+            catch (Exception ex)
+            {
+                throw GetSqlException(ex);
+            }
+        }
+
+        /// <summary>
+        /// Create temp table
+        /// </summary>
+        /// <param name="command"></param>
+        /// <returns></returns>
+        public override async Task<SixnetTempTable> CreateTempTableAsync(SixnetSingleDatabaseCommand command)
+        {
+            try
+            {
+                var dataCommandResolver = GetDataCommandResolver();
+                var queryStatement = dataCommandResolver.GenerateDatabaseQueryStatement(command);
+                await command.Connection.DbConnection.ExecuteAsync(GetCommandDefinition(command, queryStatement)).ConfigureAwait(false);
+
+                return new SixnetTempTable()
+                {
+                    Name = $"#{command.DataCommand?.Queryable?.Info.TempTableName}"
+                };
+            }
+            catch (Exception ex)
+            {
+                throw GetSqlException(ex);
+            }
         }
 
         #endregion
