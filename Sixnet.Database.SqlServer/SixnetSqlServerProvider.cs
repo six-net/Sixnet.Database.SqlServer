@@ -68,7 +68,7 @@ namespace Sixnet.Database.SqlServer
         /// Get data command resolver
         /// </summary>
         /// <returns></returns>
-        protected override ISixnetDataCommandResolver GetDataCommandResolver()
+        protected override ISixnetDataCommandResolver GetDataCommandResolver(SixnetDatabaseCommand command)
         {
             return SixnetSqlServerManager.GetCommandResolver();
         }
@@ -82,7 +82,7 @@ namespace Sixnet.Database.SqlServer
         /// </summary>
         /// <param name="parameters">Data command parameters</param>
         /// <returns></returns>
-        protected override DynamicParameters ConvertDataCommandParameters(SixnetDataCommandParameters parameters)
+        protected override DynamicParameters ConvertDataCommandParameters(SixnetDatabaseCommand command, SixnetDataCommandParameters parameters)
         {
             return parameters?.ConvertToDynamicParameters(SixnetSqlServerManager.GetCommandResolver().DatabaseType);
         }
@@ -128,6 +128,14 @@ namespace Sixnet.Database.SqlServer
                     {
                         BuildColumnMapping(sqlServerBulkCopy, command.DataTable);
                     }
+
+                    using var cmd = new SqlCommand(
+    "SELECT @@SPID",
+    dbConnection,
+    command.Connection.Transaction.DbTransaction as SqlTransaction);
+
+                    var spid = await cmd.ExecuteScalarAsync();
+
                     sqlServerBulkCopy.DestinationTableName = command.DataTable.TableName;
                     await sqlServerBulkCopy.WriteToServerAsync(command.DataTable).ConfigureAwait(false);
                     sqlServerBulkCopy.Close();
@@ -224,54 +232,17 @@ namespace Sixnet.Database.SqlServer
 
         #endregion
 
-        #region Create temp table
+        #region Temp table
 
-        /// <summary>
-        /// Create temp table
-        /// </summary>
-        /// <param name="command"></param>
-        /// <returns></returns>
-        public override SixnetTempTable CreateTempTable(SixnetSingleDatabaseCommand command)
+        public override SixnetTempTable HandleTemTableName(SixnetTempTable tempTable)
         {
-            try
+            if (tempTable != null)
             {
-                var dataCommandResolver = GetDataCommandResolver();
-                var queryStatement = dataCommandResolver.GenerateDatabaseQueryStatement(command);
-                command.Connection.DbConnection.Execute(GetCommandDefinition(command, queryStatement));
-
-                return new SixnetTempTable()
-                {
-                    Name = $"#{command.DataCommand?.Queryable?.Info.TempTableName}"
-                };
+                var copyTempTable = tempTable.Clone();
+                copyTempTable.Name = $"#{tempTable.Name}";
+                return copyTempTable;
             }
-            catch (Exception ex)
-            {
-                throw GetSqlException(ex);
-            }
-        }
-
-        /// <summary>
-        /// Create temp table
-        /// </summary>
-        /// <param name="command"></param>
-        /// <returns></returns>
-        public override async Task<SixnetTempTable> CreateTempTableAsync(SixnetSingleDatabaseCommand command)
-        {
-            try
-            {
-                var dataCommandResolver = GetDataCommandResolver();
-                var queryStatement = dataCommandResolver.GenerateDatabaseQueryStatement(command);
-                await command.Connection.DbConnection.ExecuteAsync(GetCommandDefinition(command, queryStatement)).ConfigureAwait(false);
-
-                return new SixnetTempTable()
-                {
-                    Name = $"#{command.DataCommand?.Queryable?.Info.TempTableName}"
-                };
-            }
-            catch (Exception ex)
-            {
-                throw GetSqlException(ex);
-            }
+            return tempTable;
         }
 
         #endregion
